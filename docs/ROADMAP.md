@@ -5,14 +5,20 @@ This is the single plan for **GrpcAsm** (`AsmFoundation/GrpcAsm`): a gRPC server
 as NuGet packages.
 
 GrpcAsm builds with **AsmSdk** (`AsmFoundation/AsmSdk`, NuGet
-`AsmFoundation.Sdk`).
+`AsmFoundation.Sdk`): AsmFoundation's enterprise-grade project, dependency and
+build management for assembly, on MSBuild and NuGet.
 
-- **AsmSdk is a product of its own:** enterprise-grade project, dependency and
-  build management for assembly, on MSBuild and NuGet, for any assembly
-  codebase.
-- **GrpcAsm is one consumer of it, not its purpose.** Milestone A below records
-  the AsmSdk work GrpcAsm depends on.
-- **AsmSdk keeps its own roadmap, changelog and releases.**
+- **AsmSdk is a product of its own,** for any assembly codebase, and GrpcAsm is
+  not its purpose. GrpcAsm is one of its consumers, as KvAsm is. It uses AsmSdk
+  the way any consumer does, through the documented project model and the
+  published packages, and needs nothing from it that is specific to GrpcAsm.
+- **AsmSdk's roadmap, changelog and releases are its own**
+  (github.com/AsmFoundation/AsmSdk). This plan only records which AsmSdk
+  release GrpcAsm builds with and what it relies on.
+- **About the milestone letters:** the first draft of this plan listed AsmSdk
+  as milestone A. AsmSdk is not a GrpcAsm milestone, so GrpcAsm's milestones
+  are B to F. The letters stay as they were, so that the commits and records
+  that cite them stay correct.
 
 Everything here was decided by the owner on 2026-11-17, from options laid out side
 by side. Milestones are cut so that each one ends tested, committed and pushed.
@@ -49,97 +55,41 @@ Each later milestone builds only on what an earlier one shipped.
 | Scope | Server **and client**, then KvAsm rebuilt on GrpcAsm | "least jumps or compute or stack" |
 | Public APIs | NASM (`grpcasm.inc`), C ABI (`grpcasm.h`), .NET (`GrpcAsm.Net`) | plus **Python through the C ABI** |
 | Toolchain | **Bundled in NuGet:** NASM + LLVM `ld.lld` / `llvm-ar` | no WSL, apt or Docker needed to build |
-| Home | **Two public repos:** AsmFoundation/AsmSdk and AsmFoundation/GrpcAsm | published to nuget.org; Apache-2.0 |
+| Home | **Two public repos:** AsmFoundation/AsmSdk and AsmFoundation/GrpcAsm | published to nuget.org; Apache-2.0. AsmSdk was then positioned as a product of its own (owner, 2026-11-17) |
 
-## What the prototype proved (2026-11-17)
+## Building GrpcAsm with AsmSdk
 
-These ran in a throw-away prototype before this plan was written:
+GrpcAsm relies on AsmSdk only as any consumer does. All of the following is
+documented AsmSdk behavior (AsmSdk's `docs/asmproj.md`), and none of it was
+built for GrpcAsm:
 
-- `dotnet build` of a `.slnx` resolved a custom SDK named `AsmFoundation.Sdk` from
-  a NuGet feed (`global.json` → `msbuild-sdks`).
-- The SDK assembled `.asm` files with NASM and linked a Linux shared object
-  exporting the right symbol, with an SONAME. It ran from Windows, through WSL.
-- Incremental builds skipped up-to-date work.
+- **The pin:** `global.json` pins `AsmFoundation.Sdk` 0.1.0 (`msbuild-sdks`).
+  Restore takes it from nuget.org, together with the toolchain package for the
+  build machine. Nothing else is installed, and Windows, Linux and macOS all
+  build the same Linux x86-64 ELF.
+- **Project types:**
+  - `OutputType` `StaticLibrary` for the engine (`libgrpcasm.a`);
+  - `Exe` with `AsmRuntime=Libc` for KvServer and the Greeter;
+  - `Library` for `libgrpcasm.so`.
+- **References:** a `ProjectReference` between `.asmproj` projects links the
+  engine and adds its `include/`.
+- **Link options:** `AsmLinkFlags` passes `-Bsymbolic` and the version script to
+  `libgrpcasm.so`.
+- **The solution:** `GrpcAsm.slnx` lists the `.asmproj` projects with the generic
+  MSBuild project type (`Type="13B669BE-BB05-4DDF-9536-439F39A36129"`), next to
+  the `.csproj` test project.
+- **Packaging:** `dotnet pack` writes the native NuGet layout, which milestone E
+  uses.
 
-**Gotchas found:**
+**KvAsm on AsmSdk** (this de-risks milestone F): KvAsm's unmodified server builds
+with the SDK on Windows (NASM 3.02 + `ld.lld`, glibc through the stub, 14 s, a
+308 KB PIE). KvAsm's whole end-to-end suite passes against that binary: every
+phase, h2spec 146/146, fuzzing 3,000 connections plus the request matrix.
 
-- `.slnx` needs `Type="13B669BE-BB05-4DDF-9536-439F39A36129"` (generic MSBuild
-  project) for the `.asmproj` extension.
-- An SDK riding on `Microsoft.NET.Sdk` must define an empty
-  `CreateManifestResourceNames`, because an unknown extension gets no language
-  targets.
-- A persistent MSBuild node caches SDK files. Use `-nodeReuse:false` while
-  iterating on the SDK.
-
-## Milestone A — AsmSdk 0.1.0, the build system GrpcAsm uses
-
-**Status (2026-11-17): released as AsmFoundation.Sdk 0.1.0.**
-
-- `github.com/AsmFoundation/AsmSdk`, tag `v0.1.0`.
-- CI is green on win-x64, linux-x64 and osx-arm64. `tests/run.py` passes 21/21
-  on each: Linux runs the outputs, the other two build and inspect them.
-- Trusted publishing pushed `AsmFoundation.Sdk` and the three
-  `AsmFoundation.Toolchain.<rid>` packages to nuget.org.
-- **Milestone F is de-risked:** KvAsm's unmodified server builds with the SDK
-  on Windows (NASM 3.02 + `ld.lld`, glibc through the stub, 14 s, a 308 KB
-  PIE). KvAsm's whole end-to-end suite passes against that binary: every
-  phase, h2spec 146/146, fuzzing 3,000 connections plus the request matrix.
-  - **What is left for F:** the official image is a static-PIE
-    `FROM scratch` build with glibc linked in. An SDK build links glibc
-    dynamically, so the image would carry glibc, or the static link would use
-    `AsmToolchain=System`. That is a decision to measure, not assume.
-
-**Packages:**
-
-- `AsmFoundation.Sdk` is the MSBuild SDK (package type `MSBuildSdk`). A project
-  starts with `<Project Sdk="AsmFoundation.Sdk">`.
-- `AsmFoundation.Toolchain.<host-rid>` carries NASM, `ld.lld` and `llvm-ar` for
-  `win-x64`, `linux-x64` and `osx-arm64`. The SDK downloads the one that matches
-  the build machine (a `PackageDownload` during restore). Every host produces the
-  same Linux x86-64 ELF output.
-
-**The `.asmproj` model (rides on `Microsoft.NET.Sdk` like Microsoft's NoTargets):**
-
-- `OutputType`: `Library` (shared `.so`), `StaticLibrary` (`.a`), `Exe` (static
-  or PIE executable), `Objects`.
-- Sources: `**/*.asm` by default (`AsmSource` items). Include directories come
-  from `AsmIncludeDirectory` items, preprocessor symbols from `AsmDefine`. Extra
-  NASM flags go in `AsmFlags`, defaulting to `-w+all -w+error`.
-- **Incremental builds:** NASM `-MD` dependency files, so editing an `.inc`
-  rebuilds exactly the sources that include it.
-- **Hosted vs freestanding:**
-  - A hosted library (it calls libc) links against a libc stub that the SDK
-    generates. It gets `DT_NEEDED libc.so.6` without a Linux sysroot, so it
-    builds on Windows and macOS.
-  - Freestanding code (no libc) links with nothing.
-  - `AsmToolchain=System` uses the machine's `nasm`, `ld` and `gcc` instead, for
-    links that need a real sysroot (for example KvAsm's static glibc).
-- **References:**
-  - **ProjectReference** between asmprojs links the referenced output and adds
-    its include directories.
-  - **PackageReference** to an asm package does the same through the package's
-    `build/` props.
-  - A **csproj** referencing an asmproj gets the `.so` copied next to it, for
-    P/Invoke tests.
-- **Pack:** `dotnet pack` writes the native NuGet layout:
-  - `include/` (`.inc`, `.h`);
-  - `src/` (optional `.asm` sources, for consumers who specialize at assembly
-    time);
-  - `native/linux-x64/*.a` (not `lib/`, which NuGet treats as managed
-    assemblies) and `runtimes/linux-x64/native/*.so`;
-  - generated `build/<id>.props`/`.targets` that wire all of the above into a
-    consuming asmproj.
-- **Versioning:** NuGet package versions are the dependency versions. An asm
-  library is pinned like any .NET library.
-
-**Exit criteria:**
-
-- CI on ubuntu, windows and macos builds the sample solution: a shared library,
-  a static library, an executable, a package consumed through PackageReference
-  from a local feed, and a csproj that P/Invokes the shared library.
-- The Linux job runs the outputs.
-- Packages are published through nuget.org trusted publishing (a new policy for
-  AsmFoundation/AsmSdk).
+- **What is left for F:** the official image is a static-PIE `FROM scratch`
+  build with glibc linked in. An SDK build links glibc dynamically, so the image
+  would carry glibc, or the static link would use `AsmToolchain=System`. That is
+  a decision to measure, not assume.
 
 ## Milestone B — GrpcAsm server
 

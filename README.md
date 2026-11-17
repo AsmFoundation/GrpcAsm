@@ -23,9 +23,12 @@ between the network and their code.
   - a C ABI (`grpcasm.h`, `libgrpcasm.so` / `.a`);
   - .NET (`GrpcAsm.Net`);
   - Python, through the C ABI.
-- **Distributed as NuGet packages,** built with
-  [AsmSdk](https://github.com/AsmFoundation/AsmSdk) (`AsmFoundation.Sdk`). The
-  repository is a solution of `.asmproj` and `.csproj` projects.
+- **Distributed as NuGet packages.** It builds with
+  [AsmSdk](https://github.com/AsmFoundation/AsmSdk) (`AsmFoundation.Sdk`),
+  AsmFoundation's project, dependency and build management for assembly on
+  MSBuild and NuGet. AsmSdk is a product of its own, and GrpcAsm is one of its
+  consumers. The repository is a solution of `.asmproj` and `.csproj`
+  projects.
 
 Runtime: Linux x86-64. Build machines: Windows, Linux and macOS, through
 AsmSdk's bundled toolchain.
