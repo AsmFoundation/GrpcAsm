@@ -7,9 +7,11 @@
     Milestone B: step 1 split the files, step 2 renamed the engine's exports to ga_*, step 3
     made the application hooks the only way the engine calls out (the ga_app_* symbols declared
     and documented in include/grpcasm_hooks.inc, which an application such as samples/KvServer
-    defines and the linker binds), and step 4 moved the generic half of KvAsm's grpc.asm in
-    here (body buffering, validation, the health service, stream release). The next step
-    replaces the fixed routes with route tables (docs/ROADMAP.md).
+    defines and the linker binds), step 4 moved the generic half of KvAsm's grpc.asm in here
+    (body buffering, validation, the health service, stream release), and step 5a replaced
+    KvAsm's hard-coded routes with the application's route table (ga_app_routes,
+    include/grpcasm_routes.inc). Next: the server lifecycle and a generic test service
+    (docs/ROADMAP.md).
   -->
   <PropertyGroup>
     <OutputType>StaticLibrary</OutputType>

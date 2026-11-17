@@ -143,8 +143,9 @@ global ga_grpc_write_prefix:function
 ;          codec, or identity, is INTERNAL (the sender contradicts itself);
 ;          flag 0 is accepted whatever grpc-encoding says, because it means
 ;          "not compressed".
-;          A client-streaming route (M_UPLOAD) consumed its body as it
-;          arrived, so its end goes to ga_app_stream_end with no framing
+;          A client-streaming route (GA_ROUTE_CLIENT_STREAM; KvServer: Upload)
+;          consumed its body as it arrived, so its end goes to
+;          ga_app_stream_end with no framing
 ;          check. A call answered early (ST_RESPONDED: a streaming request
 ;          refused while its body was still arriving) is left alone and not
 ;          counted again.
@@ -166,10 +167,10 @@ ga_grpc_dispatch:
     test    eax, ST_CT_OK
     jz      .http_415
     mov     rcx, [rsi + Stream.method]
-    cmp     rcx, M_UNKNOWN
-    je      .e_method
-    cmp     rcx, M_UPLOAD
-    je      .stream_end                 ; body already consumed: no framing to check
+    cmp     rcx, GA_ROUTE_UNKNOWN
+    je      .e_method                   ; no route matched the :path
+    test    cl, GA_ROUTE_CLIENT_STREAM
+    jnz     .stream_end                 ; body already consumed: no framing to check
     test    eax, ST_TOO_LARGE
     jnz     .e_toolarge
 
@@ -189,7 +190,7 @@ ga_grpc_dispatch:
     jne     .e_framing
     add     rdx, GRPC_PREFIX            ; the message
     mov     rcx, r9                     ; its length
-    cmp     qword [rsi + Stream.method], M_HEALTH
+    cmp     qword [rsi + Stream.method], GA_ROUTE_HEALTH
     je      health_check                ; tail jump (Conn*, Stream*, message, length)
     jmp     ga_app_unary wrt ..plt      ; tail call (Conn*, Stream*, message, length)
 
@@ -340,7 +341,7 @@ ga_grpc_write_prefix:
 ; =============================================================================
 ; health_check — grpc.health.v1.Health/Check, built into every server.
 ; Internal (tail-jumped from ga_grpc_dispatch).
-; @param  rdi  Conn*   @param rsi  Stream* (route M_HEALTH)
+; @param  rdi  Conn*   @param rsi  Stream* (route GA_ROUTE_HEALTH)
 ; @param  rdx  the HealthCheckRequest message   @param rcx  its length
 ; @returns eax = 0, or -1 when out of memory (the caller ends the connection).
 ; @remarks HealthCheckRequest{string service = 1}. An empty or absent service

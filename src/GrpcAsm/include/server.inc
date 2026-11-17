@@ -274,13 +274,10 @@ endstruc
 ; when it attaches such state, and may clear it once nothing is left (a
 ; published Put), which puts the stream back on stream_free's one-call path.
 %define ST_APP_STATE        1024
-%define M_UNKNOWN           0
-%define M_GET               1
-%define M_PUT               2
-%define M_DELETE            3
-%define M_HEALTH            4           ; grpc.health.v1.Health/Check
-%define M_UPLOAD            5           ; client streaming: DATA consumed as it arrives
-%define M_DOWNLOAD          6           ; server streaming: body generated (ST_GEN)
+; Stream.method holds the call's route byte (grpcasm_routes.inc): one of the
+; application's methods from its ga_app_routes table, GA_ROUTE_UNKNOWN or
+; GA_ROUTE_HEALTH; GA_ROUTE_CLIENT_STREAM marks a client-streaming method.
+%include "grpcasm_routes.inc"
 ; The application's per-call area (Stream.app), sized at assembly time. 72
 ; bytes keep the Stream at 224: with the pool's 16-byte header one 256-byte
 ; block, and a multiple of 16 for stream_open's inline zeroing (h2n.asm

@@ -788,8 +788,8 @@ h2_process:
     lea     rax, [rsi + rcx]
     cmp     rax, r13
     ja      .next                       ; the payload is not whole yet
-    cmp     qword [rdx + Stream.method], M_UPLOAD
-    je      .next                       ; client streaming consumes DATA as it arrives
+    test    byte [rdx + Stream.method], GA_ROUTE_CLIENT_STREAM
+    jnz     .next                       ; client streaming consumes DATA as it arrives
     cmp     qword [rdx + Stream.clen], 0
     jge     .next                       ; a declared content-length: the loop checks it
     ; Three of the loop's checks cannot fail here and are not repeated: the
@@ -913,11 +913,12 @@ h2_process:
     ja      .d_malformed
 .d_append:
     mov     rcx, [rsp + L_T1]
-    ; Upload: grpc.asm consumes the bytes as they arrive — it decodes the
-    ; message stream and writes the value straight into its record — so this
-    ; stream never buffers or borrows a body.
-    cmp     qword [rbp + Stream.method], M_UPLOAD
-    je      .d_upload
+    ; A client-streaming route: the application consumes the bytes as they
+    ; arrive (KvServer's Upload decodes the message stream and writes the
+    ; value straight into its record), so this stream never buffers or
+    ; borrows a body.
+    test    byte [rbp + Stream.method], GA_ROUTE_CLIENT_STREAM
+    jnz     .d_upload
     test    rcx, rcx
     jz      .d_appended
     ; Zero copy: a whole body in this one frame (nothing buffered before,

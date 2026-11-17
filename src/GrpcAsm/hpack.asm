@@ -19,7 +19,9 @@
 ; otherwise diverge from the peer's encoder.
 ;
 ; Meanings (hpack.inc) are computed once per distinct field, so the hot path —
-; indexed fields of a warm table — never compares strings.
+; indexed fields of a warm table — never compares strings. A :path's meaning
+; carries its route (grpcasm_routes.inc): the built-in health path, or an
+; entry of the application's ga_app_routes table.
 ;
 ; Memory: entry strings live in blocks from the connection's worker pool
 ; (pool.asm); the ring of entry descriptors too. Bounded by the table limit.
@@ -32,6 +34,7 @@ bits 64
 %include "grpcasm_sys.inc"
 %include "server.inc"
 %include "hpack.inc"
+%include "grpcasm_hooks.inc"            ; ga_app_routes, the application's route table
 
 extern ga_pool_malloc
 extern ga_pool_free
@@ -156,13 +159,7 @@ CSTR v_head,        "HEAD"
 CSTR v_grpc,        "application/grpc"
 CSTR v_trailers,    "trailers"
 CSTR v_identity,    "identity"
-CSTR v_health,      "/grpc.health.v1.Health/Check"
-CSTR v_prefix,      "/kvasm.v1.KvAsm/"
-CSTR v_get,         "Get"
-CSTR v_put,         "Put"
-CSTR v_delete,      "Delete"
-CSTR v_upload,      "Upload"            ; client streaming (grpc.asm consumes it as it arrives)
-CSTR v_download,    "Download"          ; server streaming (a generated body)
+CSTR v_health,      "/grpc.health.v1.Health/Check" ; the engine's own route (GA_ROUTE_HEALTH)
 
 ; hp_token[c] = 1 for characters legal in an HTTP/2 field name: RFC 9110
 ; tchar, lowercase only (RFC 9113 §8.2.1: uppercase names are malformed).
@@ -969,7 +966,9 @@ classify_name:
 ; @returns eax = code | class << 8 | flags. Clobbers rax, rcx, rdi, r8-r11.
 ; @remarks HF_VALUE_BAD: NUL, CR or LF anywhere, or SP/HTAB at either end
 ;          (RFC 9113 §8.2.1). Classes are only computed for the codes whose
-;          values KvAsm acts on.
+;          values the engine acts on. A :path's class is its route byte: the
+;          health path, else the first exact match in ga_app_routes, else
+;          GA_ROUTE_UNKNOWN.
 ; =============================================================================
 %macro VALUEIS 1                        ; ZF=1 iff (rsi, rdx) equals `label`
     NAMEIS  %1
@@ -1037,43 +1036,37 @@ classify_value:
     or      r11d, VC_HEAD << 8
     jmp     .ret
 .path:
-    VALUEIS v_health                    ; exact path, before the KvAsm prefix
-    jne     .kv_path
-    or      r11d, M_HEALTH << 8
+    VALUEIS v_health                    ; the engine's own route, before the table
+    jne     .app_route
+    or      r11d, GA_ROUTE_HEALTH << 8
     jmp     .ret
-.kv_path:
-    cmp     rdx, v_prefix_len
-    jbe     .ret
-    push    rsi
+.app_route:
+    ; The application's table (grpcasm_routes.inc): [length][route][path]
+    ; per entry, a zero length at the end. Lengths are compared first, so
+    ; only an entry of the right length costs a ga_keyeq. r9 walks the
+    ; table and r10 holds the route found; ga_keyeq keeps both (and rsi,
+    ; rdx), and classify_value may clobber them.
+    lea     r9, [ga_app_routes]
+    xor     r10d, r10d                  ; GA_ROUTE_UNKNOWN until an entry matches
+.route_next:
+    movzx   eax, byte [r9]              ; the entry's path length; 0 ends the table
+    test    eax, eax
+    jz      .route_done
+    cmp     rax, rdx
+    jne     .route_skip                 ; another length: no compare
+    lea     rdi, [r9 + 2]               ; the entry's path
     push    rdx
-    mov     rdx, v_prefix_len
-    VALUEIS v_prefix
+    call    ga_keyeq wrt ..plt
     pop     rdx
-    pop     rsi
-    jne     .ret
-    push    rsi
-    push    rdx
-    add     rsi, v_prefix_len
-    sub     rdx, v_prefix_len
-    mov     r10d, M_GET
-    VALUEIS v_get
-    je      .route
-    mov     r10d, M_PUT
-    VALUEIS v_put
-    je      .route
-    mov     r10d, M_DELETE
-    VALUEIS v_delete
-    je      .route
-    mov     r10d, M_UPLOAD
-    VALUEIS v_upload
-    je      .route
-    mov     r10d, M_DOWNLOAD
-    VALUEIS v_download
-    je      .route
-    xor     r10d, r10d                  ; M_UNKNOWN
-.route:
-    pop     rdx
-    pop     rsi
+    test    eax, eax
+    jnz     .route_found
+    movzx   eax, byte [r9]              ; ga_keyeq clobbered rax
+.route_skip:
+    lea     r9, [r9 + rax + 2]          ; past [length][route][path]
+    jmp     .route_next
+.route_found:
+    movzx   r10d, byte [r9 + 1]
+.route_done:
     shl     r10d, 8
     or      r11d, r10d
     jmp     .ret

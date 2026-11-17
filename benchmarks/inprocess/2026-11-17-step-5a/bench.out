@@ -1,0 +1,9 @@
+vCPU 31 of 32; 12 interleaved rounds; bench get|ping 1024 keys, 40 trials x 1000 batches
+## get
+kvasm    min   70.44 ns/request   median   71.05   rounds within 2% of min: 12/12
+step4    min   70.08 ns/request   median   70.91   rounds within 2% of min: 11/12
+step5a   min   69.79 ns/request   median   70.27   rounds within 2% of min: 12/12
+## ping
+kvasm    min   44.22 ns/request   median   44.43   rounds within 2% of min: 11/12
+step4    min   41.63 ns/request   median   41.75   rounds within 2% of min: 10/12
+step5a   min   41.54 ns/request   median   41.86   rounds within 2% of min: 11/12

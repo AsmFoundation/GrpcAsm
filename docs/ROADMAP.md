@@ -143,7 +143,8 @@ These ran in a throw-away prototype before this plan was written:
 
 ## Milestone B — GrpcAsm server
 
-**Status (2026-11-17): steps 1 to 4 of 5 done.**
+**Status (2026-11-17): steps 1 to 4 and 5a done; 5b (the generic test
+service) is next.**
 
 **Step 1 — physical split, no instruction changed (done):**
 
@@ -280,11 +281,51 @@ These ran in a throw-away prototype before this plan was written:
   matrix exact, 3,000 fuzzed connections, and the streaming limits and
   fairness phases.
 
+**Step 5a — route tables (done):**
+
+- **The table:** the application lists its methods in `ga_app_routes`, a table
+  in its own `.rodata`, built with `GA_ROUTE "path", route` and
+  `GA_ROUTES_END` from `include/grpcasm_routes.inc`.
+  - It holds no pointers, so it needs no relocation: each entry is
+    `[path length][route][path bytes]`, and a zero length ends the table.
+  - `hpack.asm` checks the built-in health path first, then looks for the
+    first exact match in the table.
+  - The KvAsm prefix and method names are gone from the engine.
+  - KvServer's table is the new `routes.asm`; its `M_*` numbers moved to its
+    `kvasm.inc`.
+- **The route byte in `Stream.method`:**
+  - 1–62 are the application's methods;
+  - `GA_ROUTE_CLIENT_STREAM` (0x40) marks a client-streaming method;
+  - 0 is `GA_ROUTE_UNKNOWN`;
+  - 63 is `GA_ROUTE_HEALTH`.
+
+  It travels in the 8-bit value class of an HPACK meaning, whose bit 7 already
+  means "empty value" (`VC_EMPTY`). A server that needs more than 62 methods
+  widens that field.
+- **Checked at assembly time:** `GA_ROUTE` refuses a path of 0 or more than
+  255 bytes, route 0, the health route, routes above 62, and any flag other
+  than client streaming. Each refusal was tried, and each fails the build with
+  its own message.
+- **Flag tests:** h2n's two tests of `Stream.method == M_UPLOAD` and
+  dispatch's one are now flag tests: one instruction each, as before.
+- **The lookup is off the request path.** It runs once per distinct `:path`
+  field of a connection, because the HPACK meaning cache and the header-block
+  cache keep the result.
+- **Measured** (`benchmarks/inprocess/2026-11-17-step-5a`, using the reusable
+  `benchmarks/inprocess/bench_ga.sh`):
+  - **GET:** KvAsm 0.3.0 70.44 ns, step 4 70.08 ns, step 5a 69.79 ns;
+  - **Health check:** 44.22, 41.63 and 41.54 ns;
+  - the same output digests.
+- **Verified:** `tests/kvsuite.sh` passes every phase, including the itest's
+  unknown-method and unknown-service cases.
+
 **The next steps:**
 
-- **Step 5:** route tables instead of `hpack.asm`'s hard-coded
-  `/kvasm.v1.KvAsm/` prefix, plus a generic Echo/Greeter test service with its
-  own tests (h2spec, a fuzz matrix, interop with grpc-dotnet).
+- **Step 5b:** the generic half of KvServer's `main.asm` moves into the
+  engine: blocking the signals, creating and starting the workers,
+  `sigwaitinfo`, drain, join and the totals. Then a generic Greeter test
+  service (`helloworld.Greeter/SayHello`) gets its own tests: h2spec and
+  interop with grpc-dotnet. A generic fuzz matrix follows.
 
 **The plan for the server, as first written:**
 

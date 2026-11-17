@@ -11,6 +11,16 @@
 %define KVASM_INC
 
 %include "grpcasm_sys.inc"         ; syscalls, errno, mmap (GrpcAsm engine)
+%include "grpcasm_routes.inc"      ; GA_ROUTE_* (GrpcAsm engine)
+
+; ---- routes: this server's methods (Stream.method), listed in routes.asm ------
+; The numbers are this server's own (1..GA_ROUTE_MAX, grpcasm_routes.inc); 4
+; was the health check's, which the engine now answers itself.
+%define M_GET               1
+%define M_PUT               2
+%define M_DELETE            3
+%define M_UPLOAD            (5 | GA_ROUTE_CLIENT_STREAM) ; client streaming: DATA consumed as it arrives
+%define M_DOWNLOAD          6           ; server streaming: body generated (ST_GEN)
 
 ; ---- key hash (store.asm kv_store_hash, aeshash.asm) ---------------------------
 ; Which keyed hash places keys (kv_set_hash_mode). Process-wide, set once at

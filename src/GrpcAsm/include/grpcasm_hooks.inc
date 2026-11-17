@@ -40,8 +40,8 @@
 ; ends. Its per-connection state lives in Conn.app. An answer may be deferred
 ; to the end of the read: the application sets ST_BATCHED, links the stream on
 ; Conn.batch_head (through Stream.batch_next, in arrival order) and answers it
-; in ga_app_batch_end. Stream.method is the route hpack.asm resolved from
-; :path (fixed routes until step 5's route tables).
+; in ga_app_batch_end. Stream.method is the route byte hpack.asm resolved
+; from :path through the application's route table (ga_app_routes below).
 ; =============================================================================
 
 %ifndef GRPCASM_HOOKS_INC
@@ -120,8 +120,8 @@ extern ga_app_worker_tick
 extern ga_app_unary
 
 ; ga_app_stream_data — consume a chunk of a client-streaming request.
-; @param   rdi  Conn*   @param rsi  Stream* (a streaming route; KvServer:
-;               M_UPLOAD)
+; @param   rdi  Conn*   @param rsi  Stream* (a GA_ROUTE_CLIENT_STREAM route;
+;               KvServer: Upload)
 ; @param   rdx  data    @param rcx  length (> 0)
 ; @returns eax = 0 (consumed; the stream lives on), 1 (answered early, an
 ;          error: the stream may already be closed and freed, so the engine
@@ -188,5 +188,15 @@ extern ga_app_call_release
 ;          service name; the empty name means the whole server and needs no
 ;          hook. A leaf in practice: compare and return.
 extern ga_app_health_service
+
+; ---- the route table (data, not code) --------------------------------------------
+
+; ga_app_routes — the application's methods: a table built with GA_ROUTE and
+; ended with GA_ROUTES_END (grpcasm_routes.inc), in the application's .rodata.
+; @remarks hpack.asm reads it, never writes it, to classify every new :path
+;          (exact match, first entry wins; the built-in health path is checked
+;          first). It holds no pointers, so it needs no relocation. Defined
+;          like a hook: `global ga_app_routes:data`, then the entries.
+extern ga_app_routes
 
 %endif
