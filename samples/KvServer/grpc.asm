@@ -7,26 +7,26 @@
 ; it decodes them (hpack.asm "meanings"): the route from :path, ST_POST from
 ; :method, ST_CT_OK from content-type, ST_ENCODED from grpc-encoding. This
 ; module does the rest:
-;   kv_grpc_stream_append   buffer a request body within per-stream and
+;   ga_app_stream_append   buffer a request body within per-stream and
 ;                           per-connection budgets
-;   kv_grpc_dispatch        END_STREAM => validate framing, decode protobuf;
+;   ga_app_dispatch        END_STREAM => validate framing, decode protobuf;
 ;                           Get, Put and Delete join the connection's batch
 ;                           (a Put's record is allocated and filled here),
 ;                           health checks and streaming calls are answered
 ;                           here
-;   kv_grpc_run_batch       execute and answer the Gets, Puts and Deletes one
+;   ga_app_batch_end       execute and answer the Gets, Puts and Deletes one
 ;                           read queued, as one software-pipelined batch: the
 ;                           writes under one hold of the writer mutex
 ;                           (ADR 0011), then every answer in arrival order
-;   kv_grpc_stream_release  unlink and free one Stream
-;   kv_grpc_free_streams    free every Stream of a connection (teardown)
+;   ga_app_stream_release  unlink and free one Stream
+;   ga_app_free_streams    free every Stream of a connection (teardown)
 ;
 ; Routes: /kvasm.v1.KvAsm/{Get,Put,Delete} (proto/kvasm/v1/kvasm.proto)
 ; and /grpc.health.v1.Health/Check (the standard gRPC health protocol:
 ; SERVING, NOT_SERVING while draining). Anything else is UNIMPLEMENTED.
 ;
 ; Streaming routes (docs/adr/0010):
-;   Upload    client streaming. kv_grpc_upload_data receives every DATA
+;   Upload    client streaming. ga_app_stream_data receives every DATA
 ;             payload as it arrives and decodes the message stream with
 ;             kv_pb_stream_feed; the first message's key and total_size
 ;             reserve the final record (kv_store_rec_alloc), and every data
@@ -40,7 +40,7 @@
 ;   Download  server streaming. The record is looked up and pinned
 ;             (kv_store_pin) for the whole call, so one call reads one
 ;             version however the key changes meanwhile; the response body
-;             is generated frame by frame (kv_grpc_gen_fill) straight from
+;             is generated frame by frame (ga_app_stream_fill) straight from
 ;             the record as flow-control windows open: first message
 ;             total_size, then data chunks, last message crc32c.
 ;
@@ -355,16 +355,16 @@ TRAILERS_ONLY nv_e_upflag,    s_c13, s_m_upflag
 
 section .text
 
-global kv_grpc_free_streams
-global kv_grpc_run_batch
-global kv_grpc_dispatch
-global kv_grpc_stream_append
-global kv_grpc_stream_release
-global kv_grpc_upload_data
-global kv_grpc_gen_fill
+global ga_app_free_streams
+global ga_app_batch_end
+global ga_app_dispatch
+global ga_app_stream_append
+global ga_app_stream_release
+global ga_app_stream_data
+global ga_app_stream_fill
 
 ; =============================================================================
-; kv_grpc_free_streams — free every Stream still attached to a connection.
+; ga_app_free_streams — free every Stream still attached to a connection.
 ; @param  rdi  Conn*
 ; @returns nothing.
 ; @remarks Called at connection teardown (linger and destroy), after
@@ -375,7 +375,7 @@ global kv_grpc_gen_fill
 ;          connection that comes through conn_destroy later frees nothing
 ;          twice.
 ; =============================================================================
-kv_grpc_free_streams:
+ga_app_free_streams:
     push    rbx
     push    r12
     sub     rsp, 8
@@ -458,7 +458,7 @@ stream_free:
     jz      .no_wrec                    ; every other call: one compare
     mov     rax, [rbx + Stream.conn]
     mov     rax, [rax + Conn.worker]
-    mov     rdi, [rax + Worker.table]
+    mov     rdi, [rax + Worker.app]
     call    kv_store_rec_free wrt ..plt
     mov     qword [rbx + Stream.wrec], 0
 .no_wrec:
@@ -487,7 +487,7 @@ stream_free:
     ret
 
 ; =============================================================================
-; kv_grpc_stream_append — buffer request body bytes of a stream.
+; ga_app_stream_append — buffer request body bytes of a stream.
 ;
 ; @param  rdi  Conn*   @param rsi  Stream*   @param rdx  data   @param rcx  len
 ; @returns eax = 0 (appended, or dropped because the stream is TOO_LARGE),
@@ -502,7 +502,7 @@ stream_free:
 ;          h2n.asm calls this for every DATA payload it does not borrow
 ;          (a body that arrives whole in one frame is dispatched in place).
 ; =============================================================================
-kv_grpc_stream_append:
+ga_app_stream_append:
     push    rbx
     push    rbp
     push    r12
@@ -591,7 +591,7 @@ kv_grpc_stream_append:
     ret
 
 ; =============================================================================
-; stream_unlink_free (exported as kv_grpc_stream_release) — remove a Stream
+; stream_unlink_free (exported as ga_app_stream_release) — remove a Stream
 ; from its connection and free it.
 ; @param  rdi  Conn*   @param rsi  Stream*
 ; @returns nothing.
@@ -600,7 +600,7 @@ kv_grpc_stream_append:
 ;          through this function, which keeps Conn.streams and
 ;          Conn.buffered exact.
 ; =============================================================================
-kv_grpc_stream_release:
+ga_app_stream_release:
 stream_unlink_free:
     mov     rcx, [rsi + Stream.prev]
     mov     rdx, [rsi + Stream.next]
@@ -621,7 +621,7 @@ stream_unlink_free:
     jmp     stream_free                 ; tail call (keeps the caller's alignment)
 
 ; =============================================================================
-; kv_grpc_dispatch — validate a complete request, run it, answer it.
+; ga_app_dispatch — validate a complete request, run it, answer it.
 ;
 ; @param  rdi  Conn*   @param rsi  Stream* (END_STREAM received; its header
 ;              fields were resolved into Stream.method/flags by h2n.asm)
@@ -631,7 +631,7 @@ stream_unlink_free:
 ;          closes a stream whose response is complete), so the caller must
 ;          not touch it afterwards; a Get, Put or Delete instead joins the
 ;          connection's batch and is executed and answered by
-;          kv_grpc_run_batch after the read (a Put's record is built here,
+;          ga_app_batch_end after the read (a Put's record is built here,
 ;          outside the writer mutex; ADR 0011).
 ;          Validation order follows the gRPC HTTP/2 spec: method/content-type
 ;          are HTTP-level (405/415), then routing (UNIMPLEMENTED), then the
@@ -647,7 +647,7 @@ stream_unlink_free:
 ;          already answered early (a 405/415 whose body is still going out)
 ;          reaches here at END_STREAM and is left alone.
 ; =============================================================================
-kv_grpc_dispatch:
+ga_app_dispatch:
     push    rbx
     push    rbp
     push    r12
@@ -663,7 +663,7 @@ kv_grpc_dispatch:
     jnz     .answered                   ; an Upload refused early: nothing to add
     mov     rax, [r12 + Conn.worker]
     mov     r13, [rax + Worker.cfg]
-    mov     r14, [rax + Worker.table]
+    mov     r14, [rax + Worker.app]
     inc     qword [rax + Worker.st_requests]
     or      qword [rbx + Stream.flags], ST_RESPONDED
 
@@ -758,7 +758,7 @@ kv_grpc_dispatch:
     call    memcpy wrt ..plt            ; (an empty value copies nothing)
 
     ; ---- Get, Put, Delete: deferred into the connection's batch ----
-    ; The store operation itself runs in kv_grpc_run_batch once the whole
+    ; The store operation itself runs in ga_app_batch_end once the whole
     ; read is parsed. Here: remember the key (it points into req_buf, which
     ; lives as long as the Stream, or into the read buffer for a borrowed
     ; body, which lives until the batch has run) and its hashes, and start
@@ -966,7 +966,7 @@ kv_grpc_dispatch:
     ret
 
 ; =============================================================================
-; kv_grpc_run_batch — execute and answer every Get, Put and Delete queued
+; ga_app_batch_end — execute and answer every Get, Put and Delete queued
 ; while parsing the last read.
 ;
 ; @param  rdi  Conn*
@@ -993,7 +993,7 @@ kv_grpc_dispatch:
 ;          by stream_free. The batch is detached before pass 2, so nothing
 ;          can observe a half-processed list.
 ; =============================================================================
-kv_grpc_run_batch:
+ga_app_batch_end:
     push    rbx
     push    rbp
     push    r12
@@ -1007,7 +1007,7 @@ kv_grpc_run_batch:
     test    rbx, rbx
     jz      .out
     mov     rax, [r12 + Conn.worker]
-    mov     r13, [rax + Worker.table]
+    mov     r13, [rax + Worker.app]
     xor     r15d, r15d                  ; writes in the batch
 .prefetch:
     mov     rdi, [rbx + Stream.b1]
@@ -1249,7 +1249,7 @@ get_execute:
     mov     r8, [rbx + Stream.h2]
     ; Through the worker's private L1/L2 cache when one is configured (same
     ; contract, table on a miss), else straight to the shared table.
-    mov     rdi, [rax + Worker.hcache]
+    mov     rdi, [rax + Worker.app_worker]
     test    rdi, rdi
     jz      .table
     call    kv_hcache_get wrt ..plt
@@ -1363,7 +1363,7 @@ xfer_release:
     mov     rbp, [rbx + Stream.xfer]
     mov     r12, [rbx + Stream.conn]
     mov     rax, [r12 + Conn.worker]
-    mov     r13, [rax + Worker.table]
+    mov     r13, [rax + Worker.app]
     lea     r14, [rax + Worker.pool]
     mov     rsi, [rbp + Xfer.rec]
     cmp     qword [rbp + Xfer.kind], XF_DOWNLOAD
@@ -1483,7 +1483,7 @@ upload_refuse:
     jmp     refuse                      ; tail call: rdi, rsi kept, ecx = count
 
 ; =============================================================================
-; kv_grpc_upload_data — take the next DATA payload of an Upload call.
+; ga_app_stream_data — take the next DATA payload of an Upload call.
 ;
 ; @param  rdi  Conn*   @param rsi  Stream* (route M_UPLOAD)
 ; @param  rdx  data    @param rcx  length (> 0)
@@ -1502,7 +1502,7 @@ upload_refuse:
 ;          with the stream. Data after an early answer (a 405/415 body still
 ;          waiting for window) is dropped.
 ; =============================================================================
-kv_grpc_upload_data:
+ga_app_stream_data:
     push    rbx
     push    rbp
     push    r12
@@ -1761,7 +1761,7 @@ upload_event:
     or      qword [rbp + Xfer.flags], XFF_HAVE_KEY
     ; Hash it now: the key buffer goes away once the record holds the key.
     mov     rdi, [r12 + Conn.worker]
-    mov     rdi, [rdi + Worker.table]
+    mov     rdi, [rdi + Worker.app]
     mov     rsi, [rbp + Xfer.key]
     mov     rdx, [rbp + Xfer.key_len]
     lea     rcx, [rbp + Xfer.h1]        ; h1 then h2
@@ -1848,7 +1848,7 @@ ensure_record:
     add     rcx, r14
     cmp     rcx, [rax + Config.conn_budget]
     ja      .budget
-    mov     rdi, [r13 + Worker.table]
+    mov     rdi, [r13 + Worker.app]
     mov     rsi, [rbp + Xfer.key]
     mov     rdx, [rbp + Xfer.key_len]
     mov     rcx, r14
@@ -1892,7 +1892,7 @@ ensure_record:
 
 ; =============================================================================
 ; upload_finish — the peer ended an Upload: verify, publish, answer.
-; Internal (from kv_grpc_dispatch at END_STREAM).
+; Internal (from ga_app_dispatch at END_STREAM).
 ; @param  rdi  Conn*   @param rsi  Stream*
 ; @returns eax = 0, or -1 when out of memory.
 ; @remarks Checks, in order: a first message arrived (UE_FIRST_MISSING —
@@ -1937,7 +1937,7 @@ upload_finish:
     jne     .refuse
 .publish:
     mov     rax, [r12 + Conn.worker]
-    mov     rdi, [rax + Worker.table]
+    mov     rdi, [rax + Worker.app]
     mov     rsi, [rbp + Xfer.rec]
     mov     rdx, [rbp + Xfer.h1]
     mov     rcx, [rbp + Xfer.h2]
@@ -1993,7 +1993,7 @@ upload_finish:
 
 ; =============================================================================
 ; download_start — look a Download's key up, pin its record, start the
-; generated response. Internal (from kv_grpc_dispatch).
+; generated response. Internal (from ga_app_dispatch).
 ; @param  rdi  Conn*   @param rsi  Stream*
 ; @param  rdx  PbDl* (decoded; key present and within limits)
 ; @returns eax = 0, or -1 when out of memory (pin table, Xfer, output).
@@ -2017,7 +2017,7 @@ download_start:
     mov     rbx, rsi                    ; Stream*
     mov     r15, rdx                    ; PbDl*
     mov     rax, [r12 + Conn.worker]
-    mov     r13, [rax + Worker.table]
+    mov     r13, [rax + Worker.app]
     mov     rdi, r13
     mov     rsi, [r15 + PbDl.key]
     mov     rdx, [r15 + PbDl.key_len]
@@ -2126,7 +2126,7 @@ download_start:
 ; @param  rdi  Xfer* (size, off = the range start, end, chunk set)
 ; @returns rax = the sum over every response message of its 5-byte prefix
 ;          and protobuf bytes.
-; @remarks Must equal what kv_grpc_gen_fill produces, byte for byte: h2n
+; @remarks Must equal what ga_app_stream_fill produces, byte for byte: h2n
 ;          frames exactly this many bytes and then sends the trailers. The
 ;          messages: k = max(1, ceil(len / chunk)); the first carries
 ;          total_size (1 + varint), each non-empty one a data field (1 +
@@ -2185,7 +2185,7 @@ download_body_len:
     ret
 
 ; =============================================================================
-; kv_grpc_gen_fill — produce the next bytes of a Download's response body.
+; ga_app_stream_fill — produce the next bytes of a Download's response body.
 ;
 ; @param  rdi  Stream* (ST_GEN; Xfer of kind XF_DOWNLOAD)
 ; @param  rsi  destination (inside the DATA frame h2n is writing)
@@ -2200,7 +2200,7 @@ download_body_len:
 ;          all. A frame boundary may fall anywhere, even inside a head or
 ;          tail: the state lives in the Xfer. Never allocates, never fails.
 ; =============================================================================
-kv_grpc_gen_fill:
+ga_app_stream_fill:
     push    rbx
     push    rbp
     push    r12

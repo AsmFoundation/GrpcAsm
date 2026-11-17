@@ -5,15 +5,15 @@
 ; so the kernel spreads new connections across workers — no accept lock and
 ; no hand-off), an eventfd doorbell for shutdown, and every connection it
 ; accepted, together with that connection's HTTP/2 state (h2n.asm, embedded
-; in Conn). Nothing here is shared with other workers except the store, so no
-; locks are taken.
+; in Conn). Nothing here is shared with other workers except the application's
+; context (Worker.app; KvServer: the store), so no locks are taken.
 ;
 ; Per connection, I/O is non-blocking and level-triggered with half-duplex
 ; back-pressure: while output is pending the connection is watched for
 ; EPOLLOUT only (its input is not read), so a client that sends requests but
 ; never reads responses cannot make the server buffer unbounded replies.
 ;
-; HTTP/2 is KvAsm's own engine (h2n.asm, ADR 0007): it reads, parses and
+; HTTP/2 is GrpcAsm's own (h2n.asm, KvAsm's ADR 0007): it reads, parses and
 ; frames responses straight into the connection's output buffer. Output is
 ; coalesced twice: everything one read produced leaves in one sendto
 ; (measured: ~1 syscall per 16 requests instead of 3 per request), and every
@@ -30,9 +30,15 @@
 ; (measured: 4 workers holding 1,000 idle connections used 10 ms of CPU in
 ; 10 s, waking only for the 1 s housekeeping tick).
 ;
-; QSBR: the worker is an online reader while it processes events, announces a
-; quiescent state at the top of every loop pass, and goes offline only while
-; blocked in epoll_wait — so an idle worker never delays memory reclamation.
+; Application hooks (include/grpcasm_hooks.inc): the worker calls the
+; application at fixed points, each time with the Worker* in rdi —
+; ga_app_worker_init when it is created (it may fail the creation),
+; ga_app_worker_fini when it is freed, ga_app_worker_resume after every
+; wake-up and before any connection is touched, ga_app_worker_pause before it
+; sleeps in epoll_wait or exits, and ga_app_worker_tick once per housekeeping
+; pass. KvServer uses resume and pause for QSBR — an online reader while the
+; worker processes events, offline only while it is blocked in epoll_wait, so
+; an idle worker never delays memory reclamation — and tick to reclaim.
 ;
 ; Shutdown: main rings the eventfd; the worker closes its listener, sends
 ; GOAWAY on every connection (in-flight calls complete), waits for sessions to
@@ -44,6 +50,7 @@ bits 64
 
 %include "grpcasm_sys.inc"
 %include "server.inc"
+%include "grpcasm_hooks.inc"            ; the application's ga_app_* hooks
 
 %define SYS_close           3
 %define SYS_socket          41
@@ -95,20 +102,12 @@ extern memset
 extern clock_gettime
 extern pthread_create
 extern pthread_join
-extern kv_qsbr_online
-extern kv_qsbr_offline
-extern kv_qsbr_quiescent
-extern kv_store_reclaim
-extern kv_store_reclaim_local
-extern kv_grpc_free_streams
 extern ga_logb_init
 extern ga_logb_str
 extern ga_logb_u64
 extern ga_logb_emit
 extern ga_logbuf_size
 extern ga_pool_destroy
-extern kv_hcache_create
-extern kv_hcache_destroy
 extern ga_h2n_open
 extern ga_h2n_close
 extern ga_h2n_read
@@ -133,6 +132,7 @@ st_socket:      db "socket", 0
 st_bind:        db "bind", 0
 st_listen:      db "listen", 0
 st_alloc:       db "alloc", 0
+st_app_init:    db "ga_app_worker_init", 0
 align 4
 int_one:        dd 1
 
@@ -210,8 +210,10 @@ ga_port_probe:
 ; =============================================================================
 ; ga_worker_create — allocate a worker and bind its listening socket.
 ;
-; @param  rdi  worker id (also its QSBR reader slot)
-; @param  rsi  KvTable*          @param rdx  const Config*
+; @param  rdi  worker id, 0-based (KvServer: also its QSBR reader slot)
+; @param  rsi  the application's context, kept as Worker.app for the hooks
+;              (KvServer: its KvTable*)
+; @param  rdx  const Config*
 ; @returns rax = Worker*, or 0 on failure (the failing step and errno are
 ;          logged; partially created resources are released).
 ; @remarks Runs on the main thread before any worker starts, so a port that
@@ -242,7 +244,7 @@ ga_worker_create:
     mov     edx, (Worker_size + 63) & ~63
     call    memset wrt ..plt            ; also an empty Pool: all lists and chunks 0
     mov     [rbx + Worker.id], r12
-    mov     [rbx + Worker.table], r13
+    mov     [rbx + Worker.app], r13
     mov     [rbx + Worker.cfg], r14
     mov     qword [rbx + Worker.epfd], -1
     mov     qword [rbx + Worker.listen_fd], -1
@@ -259,20 +261,16 @@ ga_worker_create:
     test    rax, rax
     jz      .fail_alloc
 
-    ; Private L1/L2 record cache (KVASM_CACHE_L1_BITS/L2_BITS; off by
-    ; default, see ADR 0006). Main enabled the table's invalidation
-    ; generations before any worker was created.
-    mov     rax, [r14 + Config.cache_l1_bits]
-    or      rax, [r14 + Config.cache_l2_bits]
-    jz      .no_cache
-    mov     rdi, r13
-    mov     rsi, [r14 + Config.cache_l1_bits]
-    mov     rdx, [r14 + Config.cache_l2_bits]
-    call    kv_hcache_create wrt ..plt
-    mov     [rbx + Worker.hcache], rax
+    ; The application's per-worker state (KvServer: its private L1/L2
+    ; record cache, when configured), kept in Worker.app_worker. A negative
+    ; errno fails the creation like any other setup step; the failure path
+    ; frees the worker through worker_free, whose ga_app_worker_fini must
+    ; therefore accept a worker whose init failed or never ran.
+    mov     rdi, rbx
+    call    ga_app_worker_init wrt ..plt
+    lea     rbp, [st_app_init]
     test    rax, rax
-    jz      .fail_alloc
-.no_cache:
+    js      .fail_errno
 
     mov     edi, EPOLL_CLOEXEC
     mov     eax, SYS_epoll_create1
@@ -469,8 +467,8 @@ worker_free:
     call    free wrt ..plt
     lea     rdi, [rbx + Worker.pool]    ; every session and stream is gone by now
     call    ga_pool_destroy wrt ..plt
-    mov     rdi, [rbx + Worker.hcache]  ; NULL when caching is off
-    call    kv_hcache_destroy wrt ..plt
+    mov     rdi, rbx                    ; the application's per-worker state,
+    call    ga_app_worker_fini wrt ..plt ; also after a failed or skipped init
     mov     rdi, rbx
     call    free wrt ..plt
     pop     rbx
@@ -603,11 +601,11 @@ worker_main:
     push    r15
     sub     rsp, 8                      ; [0] eventfd counter; 6 pushes + 8: aligned
     mov     rbx, rdi
-    mov     r12, [rbx + Worker.table]
-    mov     r13, [rbx + Worker.id]
-    mov     rdi, r12
-    mov     esi, r13d
-    call    kv_qsbr_online wrt ..plt
+    ; r12 and r13 stay pushed only for the frame's alignment: the hooks take
+    ; the Worker*, so the loop no longer keeps the application's context in
+    ; registers.
+    mov     rdi, rbx
+    call    ga_app_worker_resume wrt ..plt
     mov     rdi, rbx
     call    update_now
     mov     rax, [rbx + Worker.now]
@@ -615,18 +613,18 @@ worker_main:
     mov     [rbx + Worker.next_tick], rax
 
 .loop:
-    ; One epoll_wait per pass, entered offline: no record pointers are held
-    ; here, so the worker leaves the readers' set for the wait (reclamation
-    ; never waits on a sleeping worker) and rejoins it after — an offline
-    ; announcement is also a quiescent state, so nothing else is needed.
+    ; One epoll_wait per pass, between the application's pause and resume
+    ; hooks. KvServer: no record pointers are held here, so the worker leaves
+    ; the QSBR readers' set for the wait (reclamation never waits on a
+    ; sleeping worker) and rejoins it after — an offline announcement is also
+    ; a quiescent state, so nothing else is needed.
     ; Why not poll first (timeout 0) and block only when nothing is ready, as
     ; this loop used to: the poll saved the rejoin's XCHG (~20 cycles) on a
     ; busy pass, but cost a whole extra syscall before every sleep — once per
     ; wakeup whenever the worker is not saturated, e.g. one of the four
     ; syscalls an unpipelined request needs.
-    mov     rdi, r12
-    mov     esi, r13d
-    call    kv_qsbr_offline wrt ..plt
+    mov     rdi, rbx                    ; about to sleep
+    call    ga_app_worker_pause wrt ..plt
     mov     rdi, [rbx + Worker.epfd]
     mov     rsi, [rbx + Worker.events]
     mov     edx, MAX_EVENTS
@@ -638,9 +636,8 @@ worker_main:
     mov     eax, SYS_epoll_wait
     syscall
     mov     r14, rax
-    mov     rdi, r12
-    mov     esi, r13d
-    call    kv_qsbr_online wrt ..plt    ; XCHG fence before touching the table
+    mov     rdi, rbx                    ; awake: before any connection is touched
+    call    ga_app_worker_resume wrt ..plt ; (KvServer: QSBR online, an XCHG fence)
     mov     rax, r14
 .have_events:
     mov     r14, rax
@@ -742,9 +739,8 @@ worker_main:
     mov     rdi, rbx
     call    close_all_now               ; grace period over
 .exit:
-    mov     rdi, r12
-    mov     esi, r13d
-    call    kv_qsbr_offline wrt ..plt
+    mov     rdi, rbx
+    call    ga_app_worker_pause wrt ..plt
     xor     eax, eax
     add     rsp, 8
     pop     r15
@@ -1235,7 +1231,7 @@ conn_linger:
     mov     rdi, rbp
     call    ga_h2n_close wrt ..plt      ; idempotent: conn_destroy calls it again
     mov     rdi, rbp
-    call    kv_grpc_free_streams wrt ..plt
+    call    ga_app_free_streams wrt ..plt
     mov     rdi, [rbp + Conn.fd]
     mov     esi, SHUT_WR
     mov     eax, SYS_shutdown
@@ -1272,7 +1268,7 @@ conn_destroy:
     mov     rdi, rbp
     call    ga_h2n_close wrt ..plt      ; idempotent (a lingering one was closed)
     mov     rdi, rbp
-    call    kv_grpc_free_streams wrt ..plt
+    call    ga_app_free_streams wrt ..plt
     mov     rdi, [rbp + Conn.fd]
     mov     eax, SYS_close
     syscall
@@ -1305,9 +1301,10 @@ conn_destroy:
 ; @remarks Re-arms a paused listener, ends lingering connections whose peer
 ;          never sent FIN, sends GOAWAY to idle connections — and destroys
 ;          one still idle a timeout after that GOAWAY was queued (a peer
-;          stalled at the TCP level, CONN_IDLE_CLOSING) — and returns
-;          retired store memory even when no writes happen: every worker
-;          its own slot's (ADR 0011), worker 0 also the global limbo.
+;          stalled at the TCP level, CONN_IDLE_CLOSING) — and then runs
+;          the application's ga_app_worker_tick (KvServer: returns retired
+;          store memory even when no writes happen: every worker its own
+;          slot's, ADR 0011, and worker 0 also the global limbo).
 ;          "Idle" is no byte received or sent for KVASM_IDLE_TIMEOUT_SEC,
 ;          so a transfer that keeps moving is never cut, while one whose
 ;          peer stopped reading ends at most ~2 s (two passes) after the
@@ -1379,19 +1376,10 @@ housekeeping:
     mov     rbp, r12
     jmp     .next
 .reclaim:
-    ; This worker's own slot first (ADR 0011): its batched writes retired
-    ; records there, and only it may free them — after a burst of writes the
-    ; last batches' records would otherwise wait for its next write. The
-    ; budget is the forced-reclamation one (store.asm RECLAIM_BATCH_FORCE).
-    mov     rdi, [rbx + Worker.table]
-    mov     esi, [rbx + Worker.id]
-    mov     edx, 4096
-    call    kv_store_reclaim_local wrt ..plt
-    cmp     qword [rbx + Worker.id], 0
-    jne     .out
-    mov     rdi, [rbx + Worker.table]
-    call    kv_store_reclaim wrt ..plt  ; the global limbo (per-write paths)
-.out:
+    ; The application's periodic work, once per pass (KvServer: reclaim
+    ; retired records; samples/KvServer/hooks.asm).
+    mov     rdi, rbx
+    call    ga_app_worker_tick wrt ..plt
     pop     r14
     pop     r13
     pop     r12

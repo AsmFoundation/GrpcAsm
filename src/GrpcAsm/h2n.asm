@@ -1,5 +1,5 @@
 ; =============================================================================
-; h2n.asm — KvAsm's native HTTP/2 server engine (RFC 9113), built for gRPC.
+; h2n.asm — GrpcAsm's native HTTP/2 server engine (RFC 9113), built for gRPC.
 ;
 ; Why it exists (ADR 0007): KvAsm first used nghttp2, and profiling it at
 ; one core showed the library spending ~672 of the 1,427 ns of server time
@@ -12,19 +12,21 @@
 ;   input   frames are parsed in place from the worker's read buffer; a
 ;           partial frame is carried to the next read; header blocks are
 ;           decoded by hpack.asm, whose per-field "meanings" replace string
-;           comparisons; request bodies go through grpc.asm's buffering and
-;           budgets (kv_grpc_stream_append).
+;           comparisons; request bodies go through the application's
+;           buffering and budgets (ga_app_stream_append; KvServer: grpc.asm).
 ;   output  responses are framed straight into Conn.out_buf. The response
 ;           header blocks are precomputed: after a connection's first
 ;           response, HEADERS carry 2 bytes (:status 200 + content-type) and
 ;           the trailers 1 byte (grpc-status 0). A GET hit is copied from the
 ;           store record into its DATA frame with no intermediate buffer.
-;   streams Upload DATA is handed to grpc.asm as it arrives (never buffered
-;           here); a Download body is generated frame by frame by grpc.asm
-;           (ST_GEN) as windows and output room allow, so a value of any
-;           size costs a fixed amount of connection memory. A response that
-;           completes while the peer is still sending (an upload refused
-;           early) is followed by RST_STREAM(NO_ERROR), RFC 9113 §8.1.
+;   streams a client-streaming request's DATA (KvServer: Upload) is handed to
+;           the application as it arrives (ga_app_stream_data; never buffered
+;           here); a generated body (KvServer: Download) is produced frame by
+;           frame by ga_app_stream_fill (ST_GEN) as windows and output room
+;           allow, so a value of any size costs a fixed amount of connection
+;           memory. A response that completes while the peer is still
+;           sending (an upload refused early) is followed by
+;           RST_STREAM(NO_ERROR), RFC 9113 §8.1.
 ;
 ; Protocol coverage: every RFC 9113 rule a server must enforce — connection
 ; preface, frame sizes, stream states (idle / open / half-closed / closed),
@@ -42,8 +44,12 @@
 ; memory returns -1 to the worker, which destroys the connection.
 ;
 ; Threading: one worker thread owns a connection and everything here; no
-; locks. The worker is QSBR-online while this code runs (store records stay
-; valid while a GET's value is copied).
+; locks. This code runs between the application's ga_app_worker_resume and
+; ga_app_worker_pause (KvServer: QSBR-online, so store records stay valid
+; while a GET's value is copied).
+;
+; Application hooks: every call into the application goes through a ga_app_*
+; symbol declared, with its contract, in include/grpcasm_hooks.inc.
 ; =============================================================================
 
 default rel
@@ -52,6 +58,7 @@ bits 64
 %include "grpcasm_sys.inc"
 %include "server.inc"
 %include "hpack.inc"
+%include "grpcasm_hooks.inc"            ; the application's ga_app_* hooks
 
 extern malloc
 extern realloc
@@ -65,12 +72,6 @@ extern ga_pool_realloc
 extern ga_hpack_init
 extern ga_hpack_free
 extern ga_hpack_decode
-extern kv_grpc_dispatch
-extern kv_grpc_run_batch
-extern kv_grpc_stream_append
-extern kv_grpc_stream_release
-extern kv_grpc_upload_data
-extern kv_grpc_gen_fill
 
 ; ---- frame types, flags, error codes, settings (RFC 9113 §6, §7) -----------------
 %define FT_DATA             0
@@ -233,7 +234,7 @@ ga_h2n_open:
     mov     [rbx + Conn.h2 + H2.reset_stamp], rax
     ; Connection receive window = the per-connection buffering budget, capped
     ; at the protocol maximum: the peer may have that much in flight, which
-    ; is exactly what kv_grpc_stream_append lets the connection buffer.
+    ; is exactly what ga_app_stream_append lets the connection buffer.
     mov     rax, [r13 + Config.conn_budget]
     mov     ecx, MAX_WINDOW
     cmp     rax, rcx
@@ -304,7 +305,7 @@ ga_h2n_open:
 ; @param  rdi  Conn*
 ; @returns nothing.
 ; @remarks Streams are NOT freed here: they sit on Conn.streams and the
-;          worker frees them with kv_grpc_free_streams right after.
+;          worker frees them with ga_app_free_streams right after.
 ;          Called from linger and destroy paths, possibly both, so every
 ;          pointer is cleared after its release.
 ; =============================================================================
@@ -452,7 +453,7 @@ ga_h2n_read:
     test    qword [rbx + Conn.h2 + H2.flags], H2F_CLOSING
     jnz     .ok                         ; failing connection: its batch is dropped with it
     mov     rdi, rbx
-    call    kv_grpc_run_batch wrt ..plt
+    call    ga_app_batch_end wrt ..plt
     test    eax, eax
     js      .fatal
     mov     rdi, rbx
@@ -480,7 +481,7 @@ ga_h2n_read:
 ; @remarks Once more than half of the window is used, one WINDOW_UPDATE
 ;          restores it in full (the usual HTTP/2 receiver strategy: few
 ;          updates, and the sender never stalls on a half-empty window). Request
-;          memory is bounded by the budgets in kv_grpc_stream_append, not by
+;          memory is bounded by the budgets in ga_app_stream_append, not by
 ;          withholding window.
 ; =============================================================================
 conn_window_refill:
@@ -788,7 +789,7 @@ h2_process:
     ; connection is not closing (ga_h2n_read never enters with H2F_CLOSING
     ; set, and a block that raised a connection error returned no stream);
     ; and this stream has had no DATA yet, so nothing is buffered
-    ; (req_len 0) and ST_TOO_LARGE — which only kv_grpc_stream_append sets —
+    ; (req_len 0) and ST_TOO_LARGE — which only ga_app_stream_append sets —
     ; is clear.
     mov     rax, [rbx + Conn.worker]
     mov     rax, [rax + Worker.cfg]
@@ -812,7 +813,7 @@ h2_process:
     or      qword [rbp + Stream.h2flags], SN_REMOTE_CLOSED ; request_end's step
     mov     rdi, rbx
     mov     rsi, rbp
-    call    kv_grpc_dispatch wrt ..plt  ; may answer and free the stream
+    call    ga_app_dispatch wrt ..plt   ; may answer and free the stream
     test    eax, eax
     js      .fatal
     jmp     .next
@@ -937,7 +938,7 @@ h2_process:
     mov     rdi, rbx
     mov     rsi, rbp
     mov     rdx, [rsp + L_T0]
-    call    kv_grpc_stream_append wrt ..plt
+    call    ga_app_stream_append wrt ..plt
     test    eax, eax
     jnz     .d_calm                     ; over the connection's buffering budget
 .d_appended:
@@ -969,7 +970,7 @@ h2_process:
     mov     rdi, rbx
     mov     rsi, rbp
     mov     rdx, [rsp + L_T0]
-    call    kv_grpc_upload_data wrt ..plt
+    call    ga_app_stream_data wrt ..plt
     test    eax, eax
     js      .fatal                      ; out of memory: the connection ends
     jnz     .next                       ; refused early: the stream is closed and freed
@@ -1674,7 +1675,7 @@ blocks_equal:
 ;          each once, only the request ones, :path/:method/:scheme non-empty;
 ;          content-length strictly decimal and consistent. gRPC-relevant
 ;          facts go straight into the Stream (ST_POST, ST_CT_OK, ST_ENCODED,
-;          the route in Stream.method), which kv_grpc_dispatch validates at
+;          the route in Stream.method), which ga_app_dispatch validates at
 ;          END_STREAM.
 ; =============================================================================
 field_handler:
@@ -1792,7 +1793,7 @@ field_handler:
 ; @returns eax = 0, or -1 (out of memory).
 ; @remarks content-length, when declared, must equal the DATA received
 ;          (§8.1.1), else the request is malformed (stream error). The
-;          stream may be answered and freed inside kv_grpc_dispatch: the
+;          stream may be answered and freed inside ga_app_dispatch: the
 ;          caller must not touch it afterwards.
 ; =============================================================================
 request_end:
@@ -1803,7 +1804,7 @@ request_end:
     cmp     rax, [rsi + Stream.data_len]
     jne     .malformed
 .dispatch:
-    jmp     kv_grpc_dispatch wrt ..plt  ; tail call (Conn*, Stream*)
+    jmp     ga_app_dispatch wrt ..plt   ; tail call (Conn*, Stream*)
 .malformed:
     mov     edx, [rsi + Stream.id]
     mov     ecx, E_PROTOCOL
@@ -2185,7 +2186,7 @@ map_remove:
 ; @param  rdi  Conn*   @param esi  stream id (odd, > last_id)
 ; @returns rax = Stream*, or 0 when out of memory.
 ; @remarks The Stream comes from the worker pool, is linked on Conn.streams
-;          (so kv_grpc_free_streams releases it at teardown), and enters the
+;          (so ga_app_free_streams releases it at teardown), and enters the
 ;          map; its send window starts at the peer's INITIAL_WINDOW_SIZE, its
 ;          receive window at ours.
 ;          The common case is inline: the block is popped from the pool's
@@ -2290,7 +2291,7 @@ stream_open:
 .unlink:
     mov     rdi, rbx
     mov     rsi, r13
-    call    kv_grpc_stream_release wrt ..plt
+    call    ga_app_stream_release wrt ..plt
     xor     eax, eax
 .out:
     pop     r13
@@ -2352,7 +2353,7 @@ stream_close:
     add     rsp, 8
     pop     r12
     pop     rbx
-    jmp     kv_grpc_stream_release wrt ..plt ; tail call: the frame is gone, the caller's alignment kept
+    jmp     ga_app_stream_release wrt ..plt ; tail call: the frame is gone, the caller's alignment kept
 .batched:
     or      qword [r12 + Stream.flags], ST_CLOSED
     add     rsp, 8
@@ -2758,7 +2759,7 @@ ga_h2n_reply_headers:
 ; @param  rdi  Conn*
 ; @param  rsi  Stream* — ST_GEN set, resp_len = the body's exact length (all
 ;              gRPC messages, prefixes included), resp_buf unused; the body
-;              comes from kv_grpc_gen_fill
+;              comes from ga_app_stream_fill
 ; @returns eax = 0, or -1 when out of memory (the caller ends the connection).
 ; @remarks The body never exists as a whole: each DATA frame is filled from
 ;          the source when window and output room allow (emit_progress), so
@@ -3200,7 +3201,7 @@ reply_slow:
 ;          peer's max frame size and the remaining bytes. A gRPC body ends
 ;          with the trailers; a static HTTP body ends the stream on its last
 ;          DATA frame. A generated body (ST_GEN, Download) is filled frame by
-;          frame by kv_grpc_gen_fill instead of copied from resp_buf, and each
+;          frame by ga_app_stream_fill instead of copied from resp_buf, and each
 ;          of its frames is also held to the output room below
 ;          OUT_HIGH_WATER — a peer that allows 16 MiB frames must not grow
 ;          one connection's buffer to 16 MiB.
@@ -3846,7 +3847,7 @@ write_frame:
 ; @param  rdi  Conn*   @param rsi  Stream*   @param rdx  payload length n
 ;              (1 .. FRAME_MAX; the caller already bounded it by the windows)
 ; @returns eax = 0, or -1 when out of memory.
-; @remarks kv_grpc_gen_fill writes exactly n bytes of the body — the next n
+; @remarks ga_app_stream_fill writes exactly n bytes of the body — the next n
 ;          after Stream.resp_off — straight into the output buffer: for a
 ;          Download that is one copy from the pinned record, checksummed on
 ;          the way (the caller advances resp_off and the windows afterwards).
@@ -3874,7 +3875,7 @@ write_frame_gen:
     mov     rdi, rbp
     lea     rsi, [r13 + FRAME_HDR]
     mov     rdx, r12
-    call    kv_grpc_gen_fill wrt ..plt
+    call    ga_app_stream_fill wrt ..plt
     xor     eax, eax
     jmp     .out
 .nomem:

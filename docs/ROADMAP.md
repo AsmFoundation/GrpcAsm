@@ -143,7 +143,7 @@ These ran in a throw-away prototype before this plan was written:
 
 ## Milestone B — GrpcAsm server
 
-**Status (2026-11-17): steps 1 and 2 of 5 done.**
+**Status (2026-11-17): steps 1 to 3 of 5 done.**
 
 **Step 1 — physical split, no instruction changed (done):**
 
@@ -178,20 +178,67 @@ These ran in a throw-away prototype before this plan was written:
   to `samples/KvServer/tagmatch.asm`.
 - **Verified:** `tests/kvsuite.sh` passes every phase.
 
+**Step 3 — the hook interface (done):**
+
+- `src/GrpcAsm/include/grpcasm_hooks.inc` declares and documents twelve
+  `ga_app_*` hooks: their registers, results, threads and when each one runs.
+  They are now the only way the engine calls the application. `h2n.asm` and
+  `worker.asm` include the file in place of their lists of KV symbols.
+  - **Per worker,** each taking only the `Worker*`: `ga_app_worker_init`,
+    `_fini`, `_resume` (after every wake-up), `_pause` (before every sleep and
+    at exit) and `_tick` (once per housekeeping pass).
+    - `init` returns 0 or a negative errno. The worker logs a failure as its
+      own setup step (`step=ga_app_worker_init`).
+    - `fini` must accept a worker whose `init` failed or never ran.
+  - **Per connection and stream:** `ga_app_dispatch`, `ga_app_batch_end`,
+    `ga_app_stream_append`, `ga_app_stream_data`, `ga_app_stream_fill`,
+    `ga_app_stream_release` and `ga_app_free_streams`. These are KvAsm's
+    `kv_grpc_*` functions, renamed for what they are.
+- **Two generic `Worker` fields:**
+  - `Worker.table` became `Worker.app`, the context passed to
+    `ga_worker_create`;
+  - `Worker.hcache` became `Worker.app_worker`, the application's per-worker
+    slot.
+
+  The engine reads neither.
+- KvServer's new `hooks.asm` runs exactly the KV code that the worker used to
+  call directly: the private record cache, QSBR online and offline, and
+  reclamation.
+- **How the hooks are bound:** they are link-time symbols, so the engine calls
+  them with a direct `call rel32`. There is no pointer to load and nothing to
+  register, and a missing hook fails the link. The linked `kvserver` has no
+  dynamic relocation and no `.dynsym` entry for any `ga_app_*` symbol.
+- **What it costs, measured on the objects:**
+  - The per-request code did not change. Assembled before and after, `h2n`,
+    `hpack` and `pool` and KvServer's `grpc`, `store` and `main` have
+    byte-identical `.text` and the same relocation counts. Only `worker.o`
+    changed.
+  - Per epoll pass, the pause and resume hooks each add one direct `jmp` and
+    two loads from the `Worker` (KvServer's hooks tail-call `kv_qsbr_*`).
+    Each pass already costs an `epoll_wait` system call.
+  - The paired A/B against KvAsm 0.3.0 (milestone F) measures the whole.
+- **Verified:**
+  - `tests/kvsuite.sh` passes every phase: h2spec 146/146, the
+    500-conversation matrix exact and 3,000 fuzzed connections. Phase 2b runs
+    through the private caches that `ga_app_worker_init` now creates.
+  - The failure path was forced in a container. With both caches at 24 bits
+    under a 1 GiB `ulimit -v`, worker 0 logs `worker setup failed
+    step=ga_app_worker_init errno=12` and startup ends cleanly (exit 1). With
+    the caches off, the server starts and stops cleanly under the same cap.
+
 **The next steps:**
 
-- **Step 3:** the hook interface. The engine stops naming `kv_grpc_*` and the
-  store, and calls application hooks instead:
-  - per route: request, data, end, fill, release;
-  - per worker: start, stop, pass begin and end, tick, batch end.
-
-  With the NASM API they resolve at assembly time to direct calls, or to
-  nothing.
 - **Step 4:** the generic half of `grpc.asm` moves into the engine: body
   buffering and budgets, validation (405 / 415 / UNIMPLEMENTED / framing /
   compression), error replies, the health service and stream release. A
   per-call state area sized at assembly time replaces KvAsm's KV fields in
   `Stream`.
+  - `ga_app_stream_append`, `ga_app_stream_release` and `ga_app_free_streams`
+    then become the engine's own.
+  - The hooks that remain are the worker's and the per-route ones (dispatch,
+    data, fill, batch end).
+  - With the NASM API (milestone C), a hook that an application does not
+    need is assembled away instead of called.
 - **Step 5:** route tables instead of `hpack.asm`'s hard-coded
   `/kvasm.v1.KvAsm/` prefix, plus a generic Echo/Greeter test service with its
   own tests (h2spec, a fuzz matrix, interop with grpc-dotnet).

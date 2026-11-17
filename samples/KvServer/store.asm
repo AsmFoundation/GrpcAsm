@@ -1566,7 +1566,7 @@ kv_store_publish:
 ;
 ; @param  rdi  Table*
 ; @returns nothing; returns once the caller holds the writer mutex.
-; @remarks The batched write path (grpc.asm kv_grpc_run_batch, ADR 0011): a
+; @remarks The batched write path (grpc.asm ga_app_batch_end, ADR 0011): a
 ;          worker applies every Put and Delete of one read under ONE
 ;          acquisition with kv_store_put_locked / kv_store_delete_locked,
 ;          then calls kv_store_write_end. Why: per-write locking moves the

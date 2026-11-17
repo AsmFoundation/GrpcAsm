@@ -4,11 +4,11 @@
     allocator (pool), structured logging (log) and helpers (util), moved out of KvAsm
     (AsmFoundation/KvAsm server/src at 60d7e81) unchanged.
 
-    Milestone B, step 1: a physical split only. The engine still calls the application through
-    KvAsm's hook names (kv_grpc_*, the store's QSBR and reclamation) and still shares KvAsm's
-    include files; those calls are resolved when an application (samples/KvServer) links this
-    library. The next steps rename the engine's symbols, replace the hooks with GrpcAsm's
-    handler interface and move the generic half of KvAsm's grpc.asm in here (docs/ROADMAP.md).
+    Milestone B: step 1 split the files, step 2 renamed the engine's exports to ga_*, and step 3
+    made the application hooks the only way the engine calls out: the ga_app_* symbols declared
+    and documented in include/grpcasm_hooks.inc, which an application (samples/KvServer) defines
+    and the linker binds when it links this library. The next steps move the generic half of
+    KvAsm's grpc.asm in here and replace the fixed routes with route tables (docs/ROADMAP.md).
   -->
   <PropertyGroup>
     <OutputType>StaticLibrary</OutputType>

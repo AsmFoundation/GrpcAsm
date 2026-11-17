@@ -103,7 +103,7 @@ struc Worker
     .epfd:              resq 1
     .listen_fd:         resq 1          ; -1 once closed (draining)
     .event_fd:          resq 1          ; wake-up from main (shutdown)
-    .table:             resq 1          ; KvTable* (shared)
+    .app:               resq 1          ; the application's context (ga_worker_create)
     .cfg:               resq 1          ; Config* (shared, read-only)
     .conns:             resq 1          ; doubly linked list of Conn
     .nconns:            resq 1
@@ -120,7 +120,8 @@ struc Worker
     .accept_paused:     resq 1          ; 1 while out of fds (listener unregistered)
     .st_rejected:       resq 1          ; connections refused (limit or fds)
     .pool:              resb Pool_size  ; this worker's allocator (streams, maps, HPACK rings)
-    .hcache:            resq 1          ; private L1/L2 record cache (hcache.asm), or 0
+    .app_worker:        resq 1          ; the application's per-worker state, or 0
+                                        ; (ga_app_worker_init; KvServer: its HCache*)
     ; Huffman output of the HPACK decoder (h2n.asm): decoding is synchronous,
     ; so one buffer serves every connection of the worker. malloc'd by the
     ; worker's first connection, freed with the worker.
@@ -240,7 +241,7 @@ endstruc
 ; resp_buf points at static read-only text (never freed), and the response
 ; ends on its last DATA frame: a plain HTTP error (405/415), no gRPC trailers.
 %define ST_STATIC_RESP      32
-; Queued in Conn.batch: executed and answered by kv_grpc_run_batch after the
+; Queued in Conn.batch: executed and answered by ga_app_batch_end after the
 ; current read (Get, Put and Delete; ADR 0005, ADR 0011).
 %define ST_BATCHED          64
 ; The peer reset a batched stream: run_batch frees it instead of answering.
@@ -251,7 +252,7 @@ endstruc
 ; the read that carried it has been fully processed — which covers dispatch
 ; and the batch (Get, Put, Delete) executed right after it.
 %define ST_BORROWED         256
-; The response body is generated on demand by kv_grpc_gen_fill instead of
+; The response body is generated on demand by ga_app_stream_fill instead of
 ; being read from resp_buf (Download: the value is framed straight from its
 ; pinned record as windows open). resp_len is the body's exact total length.
 %define ST_GEN              512
@@ -288,7 +289,7 @@ struc Stream
     .b2:                resq 1
     .batch_next:        resq 1
     ; A batched Put's record, allocated and filled at dispatch, owned by the
-    ; Stream until kv_grpc_run_batch publishes it (then 0). stream_free
+    ; Stream until ga_app_batch_end publishes it (then 0). stream_free
     ; returns an unpublished one (kv_store_rec_free), so a stream reset or a
     ; connection lost before its batch ran stores nothing and leaks nothing.
     .wrec:              resq 1
