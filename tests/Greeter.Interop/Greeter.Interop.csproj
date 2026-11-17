@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    grpc-dotnet against the GrpcAsm engine: Grpc.Net.Client, a client stack that shares no code
+    with GrpcAsm, calls samples/Greeter (helloworld.Greeter/SayHello and the built-in health
+    service). The Greeter runs in a stock debian:bookworm-slim container (glibc 2.36; the
+    Greeter needs 2.34+), started through Testcontainers with the freshly built binary copied in,
+    so the tests always exercise this tree's engine. Build the solution first
+    (dotnet build GrpcAsm.slnx -c Release): GreeterServer locates
+    samples/Greeter/bin/Release/greeter, or GREETER_BINARY when set.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <!-- xunit.v3 test projects are self-hosting executables. -->
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>GrpcAsm.Greeter.Interop</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Google.Protobuf" />
+    <PackageReference Include="Grpc.HealthCheck" />
+    <PackageReference Include="Grpc.Net.Client" />
+    <PackageReference Include="Grpc.Tools" PrivateAssets="All" />
+    <PackageReference Include="Testcontainers" />
+    <PackageReference Include="xunit.v3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Client stubs only: the server under test is the assembly one. -->
+    <Protobuf Include="Protos\helloworld.proto" GrpcServices="Client" />
+  </ItemGroup>
+
+</Project>

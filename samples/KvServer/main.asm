@@ -1,7 +1,8 @@
 ; =============================================================================
 ; main.asm — KvAsm process entry point.
 ;
-; Startup (fail fast, in this order, before any client can connect):
+; Startup (fail fast, in this order, before any client can connect); steps 6
+; and 7 and the shutdown are the engine's ga_server_run (src/GrpcAsm/server.asm):
 ;   1. ignore SIGPIPE (sockets also use MSG_NOSIGNAL; belt and braces)
 ;   2. load and validate configuration from the environment      (exit 2)
 ;   3. refuse a port another process holds (ga_port_probe) — before the
@@ -10,7 +11,7 @@
 ;   4. draw a 16-byte SipHash key from getrandom                 (exit 1)
 ;   5. create the store; load the snapshot if configured         (exit 1)
 ;   6. block SIGTERM/SIGINT in this thread (workers inherit the mask, so the
-;      signals are only ever consumed by sigwaitinfo below)
+;      signals are only ever consumed by ga_server_run's sigwaitinfo)
 ;   7. create every worker (binding all listeners), then start them
 ; Shutdown: sigwaitinfo returns on SIGTERM/SIGINT (works as PID 1 in a
 ; container, where default signal actions are ignored); every worker drains
@@ -36,12 +37,6 @@ bits 64
 %define VERSION_STR     "0.3.0"
 
 extern signal
-extern sigemptyset
-extern sigaddset
-extern pthread_sigmask
-extern sigwaitinfo
-extern calloc
-extern free
 extern clock_gettime
 extern kv_config_load
 extern kv_set_scan_mode
@@ -56,12 +51,8 @@ extern kv_store_destroy
 extern kv_store_reclaim
 extern kv_store_stats
 extern kv_snapshot_load
-extern ga_hpack_global_init
 extern ga_port_probe
-extern ga_worker_create
-extern ga_worker_start
-extern ga_worker_stop
-extern ga_worker_join
+extern ga_server_run                    ; the engine: workers, signals, drain (server.asm)
 extern ga_logb_init
 extern ga_logb_str
 extern ga_logb_cstr
@@ -70,14 +61,10 @@ extern ga_logb_emit
 extern ga_logbuf_size
 
 ; main's frame
-%define F_SET       0               ; sigset_t (128 bytes)
-%define F_INFO      128             ; siginfo_t (128 bytes)
-%define F_SEED      256             ; 16-byte SipHash key
-%define F_STATS     272             ; per-worker stats (3 x u64)
-%define F_TOTALS    296             ; summed stats (3 x u64)
-%define F_TS        320             ; struct timespec
-%define F_T0        336
-%define F_LOG       352             ; LogBuf lives here, LOGBUF_BYTES long
+%define F_SEED      0               ; 16-byte SipHash key
+%define F_TOTALS    16              ; ga_server_run's totals (3 x u64)
+%define F_T0        40              ; snapshot load start (ms)
+%define F_LOG       48              ; LogBuf lives here, LOGBUF_BYTES long
 %define F_FRAME     (F_LOG + LOGBUF_BYTES)
 
 ; The prologue does 6 pushes and `sub rsp, F_FRAME + 8`; calls are only
@@ -124,14 +111,10 @@ v_siphash:  db "siphash", 0
 v_aes:      db "aes", 0
 m_f_hash:   db ' msg="invalid setting" name=KVASM_HASH value=aes reason="this CPU lacks AES-NI"'
 L_f_hash    equ $ - m_f_hash
-m_listen:   db ' msg="listening" transport=h2c'
-L_listen    equ $ - m_listen
 m_loaded:   db ' msg="snapshot loaded" records='
 L_loaded    equ $ - m_loaded
 k_ms:       db " ms="
 k_keys:     db " keys="
-m_shutdown: db ' msg="shutdown requested" signal='
-L_shutdown  equ $ - m_shutdown
 m_stopped:  db ' msg="stopped" connections='
 L_stopped   equ $ - m_stopped
 k_requests: db " requests="
@@ -142,8 +125,6 @@ m_f_store:  db ' msg="cannot create store"'
 L_f_store   equ $ - m_f_store
 m_f_snap:   db ' msg="snapshot load failed, refusing to start"'
 L_f_snap    equ $ - m_f_snap
-m_f_worker: db ' msg="worker startup failed"'
-L_f_worker  equ $ - m_f_worker
 m_f_port:   db ' msg="port already in use, refusing to share it"'
 L_f_port    equ $ - m_f_port
 k_errno:    db " errno="
@@ -411,7 +392,7 @@ main:
 
     mov     rsi, [r15 + Config.snapshot]
     test    rsi, rsi
-    jz      .signals
+    jz      .serve
     call    now_ms
     mov     [rsp + F_T0], rax
     mov     rdi, rbx
@@ -441,104 +422,19 @@ main:
     LOGNUM  r13
     LOGEND
 
-.signals:
-    lea     rdi, [rsp + F_SET]
-    call    sigemptyset wrt ..plt
-    lea     rdi, [rsp + F_SET]
-    mov     esi, SIGTERM
-    call    sigaddset wrt ..plt
-    lea     rdi, [rsp + F_SET]
-    mov     esi, SIGINT
-    call    sigaddset wrt ..plt
-    mov     edi, SIG_BLOCK
-    lea     rsi, [rsp + F_SET]
-    xor     edx, edx
-    call    pthread_sigmask wrt ..plt
-
-    ; The HPACK decoder (hpack.asm) classifies the 61 static entries once,
-    ; before any worker could decode a header block (read-only after).
-    call    ga_hpack_global_init wrt ..plt
-
-    mov     rdi, [r15 + Config.workers]
-    mov     esi, 8
-    call    calloc wrt ..plt
-    test    rax, rax
-    jz      .worker_failed_early
-    mov     r14, rax                    ; Worker*[]
-    xor     r12d, r12d
-.create:
-    cmp     r12, [r15 + Config.workers]
-    jae     .start
-    mov     rdi, r12
-    mov     rsi, rbx
-    mov     rdx, r15
-    call    ga_worker_create wrt ..plt
-    test    rax, rax
-    jz      .worker_failed
-    mov     [r14 + r12*8], rax
-    inc     r12
-    jmp     .create
-.start:
-    xor     r12d, r12d
-.start_next:
-    cmp     r12, [r15 + Config.workers]
-    jae     .running
-    mov     rdi, [r14 + r12*8]
-    call    ga_worker_start wrt ..plt
+.serve:
+    ; The engine runs the server from here: it blocks SIGTERM/SIGINT (the
+    ; workers inherit the mask), creates every worker (binding all
+    ; listeners) and starts them, logs "listening", waits for a signal,
+    ; drains and joins the workers, and sums their counters into F_TOTALS
+    ; (connections, requests, errors). A worker that cannot be created or
+    ; started was logged there; exit 1 at once, as before.
+    mov     rdi, r15                    ; Config*
+    mov     rsi, rbx                    ; the store: every worker's Worker.app
+    lea     rdx, [rsp + F_TOTALS]
+    call    ga_server_run wrt ..plt
     test    eax, eax
-    jnz     .worker_failed              ; (pthread_create failure: fatal)
-    inc     r12
-    jmp     .start_next
-
-.running:
-    LOGBEGIN lvl_info
-    LOGLIT  m_listen, L_listen
-    LOGLIT  k_port, 6
-    LOGNUM  [r15 + Config.port]
-    LOGLIT  k_workers, 9
-    LOGNUM  [r15 + Config.workers]
-    LOGEND
-
-.wait_signal:
-    lea     rdi, [rsp + F_SET]
-    lea     rsi, [rsp + F_INFO]
-    call    sigwaitinfo wrt ..plt
-    test    eax, eax
-    js      .wait_signal                ; EINTR: keep waiting
-    mov     r13d, eax
-    LOGBEGIN lvl_info
-    LOGLIT  m_shutdown, L_shutdown
-    LOGNUM  r13
-    LOGEND
-
-    xor     r12d, r12d
-.stop_next:
-    cmp     r12, [r15 + Config.workers]
-    jae     .join
-    mov     rdi, [r14 + r12*8]
-    call    ga_worker_stop wrt ..plt
-    inc     r12
-    jmp     .stop_next
-.join:
-    xor     eax, eax
-    mov     [rsp + F_TOTALS], rax
-    mov     [rsp + F_TOTALS + 8], rax
-    mov     [rsp + F_TOTALS + 16], rax
-    xor     r12d, r12d
-.join_next:
-    cmp     r12, [r15 + Config.workers]
-    jae     .joined
-    mov     rdi, [r14 + r12*8]
-    lea     rsi, [rsp + F_STATS]
-    call    ga_worker_join wrt ..plt
-    mov     rax, [rsp + F_STATS]
-    add     [rsp + F_TOTALS], rax
-    mov     rax, [rsp + F_STATS + 8]
-    add     [rsp + F_TOTALS + 8], rax
-    mov     rax, [rsp + F_STATS + 16]
-    add     [rsp + F_TOTALS + 16], rax
-    inc     r12
-    jmp     .join_next
+    jnz     .return                     ; eax = 1
 .joined:
     ; KvStats is 16 x u64: KvStats_size (not a literal) so an appended
     ; counter can never make kv_store_stats write past this slot again.
@@ -567,22 +463,11 @@ main:
     LOGLIT  k_deferred, 10
     LOGNUM  rbp
     LOGEND
-    mov     rdi, r14
-    call    free wrt ..plt
     mov     rdi, rbx
     call    kv_store_destroy wrt ..plt
     xor     eax, eax
     jmp     .return
 
-.worker_failed:
-    ; Workers created so far never started (or some did): stop and join
-    ; the started ones would need bookkeeping; a startup failure is fatal and
-    ; the process exits immediately, letting the kernel reclaim resources.
-.worker_failed_early:
-    LOGBEGIN lvl_error
-    LOGLIT  m_f_worker, L_f_worker
-    LOGEND
-    mov     eax, 1
 .return:
     add     rsp, F_FRAME + 8
     pop     r15

@@ -17,6 +17,9 @@
 ;   ga_grpc_free_streams    free every Stream of a connection (teardown)
 ;   ga_grpc_refuse          answer a call with a Trailers-Only gRPC error
 ;   ga_grpc_write_prefix    write a gRPC message prefix
+;   ga_pb_field_bytes       find a length-delimited field of a protobuf
+;                           message (the health check's decoder, for
+;                           applications too)
 ;
 ; Moved here from KvAsm's grpc.asm (60d7e81) in milestone B step 4
 ; (docs/ROADMAP.md). Every status, every message text and the order of the
@@ -123,6 +126,7 @@ global ga_grpc_stream_release:function
 global ga_grpc_free_streams:function
 global ga_grpc_refuse:function
 global ga_grpc_write_prefix:function
+global ga_pb_field_bytes:function
 
 ; =============================================================================
 ; ga_grpc_dispatch — a request is complete: validate it, then route it.
@@ -354,7 +358,7 @@ ga_grpc_write_prefix:
 ;          framed by ga_h2n_reply_parts, which copies it: no response
 ;          buffer, so no allocation now and no free when the stream closes.
 ;          A malformed request is INVALID_ARGUMENT, by the same rules as
-;          KvServer's decoder (pb_field1).
+;          KvServer's decoder (ga_pb_field_bytes).
 ; =============================================================================
 health_check:
     push    rbx
@@ -364,7 +368,8 @@ health_check:
     mov     rbx, rsi                    ; Stream*
     mov     rdi, rdx
     mov     rsi, rcx
-    call    pb_field1                   ; rdx, rcx = the service name
+    mov     edx, 1                      ; HealthCheckRequest.service
+    call    ga_pb_field_bytes           ; rdx, rcx = the service name
     test    rax, rax
     jnz     .malformed
     test    rcx, rcx
@@ -413,28 +418,33 @@ health_check:
     ret
 
 ; =============================================================================
-; pb_field1 — the last field 1 (length-delimited) of a protobuf message, once
-; the whole message has been checked. Internal, leaf apart from
-; pb_read_varint.
+; ga_pb_field_bytes — the last occurrence of a length-delimited field (bytes,
+; string, an embedded message) of a protobuf message, once the whole message
+; has been checked.
 ; @param  rdi  the message (may be anything when the length is 0)
 ; @param  rsi  its length
-; @returns rax = 0 with rdx = field 1's bytes and rcx = their length (both 0
+; @param  edx  the field number (1 .. 2^29 - 1)
+; @returns rax = 0 with rdx = the field's bytes and rcx = their length (both 0
 ;          when the field is absent), or rax = -EINVAL for a malformed
-;          message. Clobbers rsi, rdi, r8-r11.
+;          message. Clobbers rsi, rdi, r8-r11; preserves rbx.
 ; @remarks The rules of KvServer's kv_pb_decode_kv field loop, so the health
 ;          check accepts and refuses exactly what KvAsm's did: unknown fields
 ;          of wire types 0, 1, 2 and 5 are skipped; groups (3, 4), the
 ;          undefined types (6, 7), field number 0, tags above 2^32 - 1, and
-;          any varint or length that runs past the end are malformed; field 1
-;          with another wire type is an unknown field; a repeated field 1
-;          replaces the earlier one (protobuf's last-wins). Every length is
-;          checked against the bytes left before a pointer is formed from it.
+;          any varint or length that runs past the end are malformed; the
+;          field with another wire type counts as an unknown field; a repeated
+;          field replaces the earlier one (protobuf's last-wins). Every length
+;          is checked against the bytes left before a pointer is formed from
+;          it. Zero-copy: the result points into the message. One pass, no
+;          allocation; no stack alignment needed (it calls only a leaf).
 ; =============================================================================
-pb_field1:
+ga_pb_field_bytes:
+    push    rbx
+    mov     ebx, edx                    ; the wanted field, kept across pb_read_varint
     lea     rdx, [rdi + rsi]            ; end
     mov     rsi, rdi                    ; cursor
-    xor     r10d, r10d                  ; field 1's bytes (0 = absent)
-    xor     edi, edi                    ; field 1's length
+    xor     r10d, r10d                  ; the field's bytes (0 = absent)
+    xor     edi, edi                    ; the field's length
 .field:
     cmp     rsi, rdx
     jae     .ok                         ; clean end of message
@@ -481,9 +491,9 @@ pb_field1:
     sub     rcx, rsi                    ; bytes remaining
     cmp     rax, rcx
     ja      .bad                        ; checked before rsi + rax is ever formed
-    cmp     r11, 1
+    cmp     r11, rbx
     jne     .skip_bytes
-    mov     r10, rsi                    ; field 1: remember it (last wins)
+    mov     r10, rsi                    ; the wanted field: remember it (last wins)
     mov     rdi, rax
 .skip_bytes:
     add     rsi, rax
@@ -492,9 +502,11 @@ pb_field1:
     mov     rdx, r10
     mov     rcx, rdi
     xor     eax, eax
+    pop     rbx
     ret
 .bad:
     mov     rax, -EINVAL
+    pop     rbx
     ret
 
 ; =============================================================================
@@ -503,8 +515,8 @@ pb_field1:
 ; @param  rdx  end of the message
 ; @returns rax = value, CF = 0 on success; CF = 1 if the varint is truncated,
 ;          longer than 10 bytes, or does not fit in 64 bits.
-; @remarks Clobbers rax, rcx, r8, r9 only (pb_field1 keeps its state in rdi,
-;          r10 and r11). The same code as KvServer's proto.asm.
+; @remarks Clobbers rax, rcx, r8, r9 only (ga_pb_field_bytes keeps its state
+;          in rbx, rdi, r10 and r11). The same code as KvServer's proto.asm.
 ; =============================================================================
 pb_read_varint:
     xor     eax, eax

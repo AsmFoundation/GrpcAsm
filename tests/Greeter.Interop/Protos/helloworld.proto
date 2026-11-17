@@ -1,0 +1,24 @@
+// The canonical gRPC example service (grpc/examples/protos/helloworld.proto, Apache-2.0), which
+// samples/Greeter serves. Field numbers and names must stay exactly these: the Greeter decodes
+// HelloRequest.name as field 1 and answers HelloReply.message as field 1.
+syntax = "proto3";
+
+option csharp_namespace = "GrpcAsm.Greeter.Interop";
+
+package helloworld;
+
+// The greeting service.
+service Greeter {
+  // Sends a greeting: "Hello " + name.
+  rpc SayHello (HelloRequest) returns (HelloReply);
+}
+
+// The request message containing the user's name.
+message HelloRequest {
+  string name = 1;
+}
+
+// The response message containing the greeting.
+message HelloReply {
+  string message = 1;
+}

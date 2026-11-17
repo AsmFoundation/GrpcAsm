@@ -143,8 +143,8 @@ These ran in a throw-away prototype before this plan was written:
 
 ## Milestone B — GrpcAsm server
 
-**Status (2026-11-17): steps 1 to 4 and 5a done; 5b (the generic test
-service) is next.**
+**Status (2026-11-17): steps 1 to 5 done.** Carried forward: a generic fuzz
+matrix, CI, and the engine's own configuration struct (below).
 
 **Step 1 — physical split, no instruction changed (done):**
 
@@ -319,13 +319,68 @@ service) is next.**
 - **Verified:** `tests/kvsuite.sh` passes every phase, including the itest's
   unknown-method and unknown-service cases.
 
-**The next steps:**
+**Step 5b — the server lifecycle, and the Greeter with its own tests (done):**
 
-- **Step 5b:** the generic half of KvServer's `main.asm` moves into the
-  engine: blocking the signals, creating and starting the workers,
-  `sigwaitinfo`, drain, join and the totals. Then a generic Greeter test
-  service (`helloworld.Greeter/SayHello`) gets its own tests: h2spec and
-  interop with grpc-dotnet. A generic fuzz matrix follows.
+- **`ga_server_run(Config*, app context, totals*)`** (`src/GrpcAsm/server.asm`)
+  is the generic half of KvServer's `main.asm`, moved:
+  - block SIGTERM/SIGINT, which the workers inherit;
+  - `ga_hpack_global_init`;
+  - create every worker, binding every listener, then start them;
+  - log `listening`;
+  - `sigwaitinfo`, which also works as PID 1;
+  - log `shutdown requested`;
+  - stop the workers, which drain, then join them and sum their counters.
+
+  The log lines and the order of the steps are KvAsm's. KvServer's `main`
+  keeps its own setup (configuration, CRC and hash modes, the store, the
+  snapshot, the port probe) and its `stopped` line. It lost 136 lines.
+- **`ga_pb_field_bytes(message, length, field)`:** the health check's
+  protobuf decoder (KvAsm's acceptance rules), now public for applications.
+- **`samples/Greeter`:** `helloworld.Greeter/SayHello` on the engine alone,
+  with no KvAsm code. It is the smallest complete application:
+  - a one-entry route table;
+  - empty hooks;
+  - SayHello framed as a stack head plus the name as the body, with no
+    allocation;
+  - "helloworld.Greeter" named for the health service;
+  - a `main` that reads `GREETER_PORT` and `GREETER_WORKERS` strictly
+    (invalid → exit 2), probes the port, and calls `ga_server_run`.
+
+  It is a 140 KB executable.
+- **`tests/greeter.sh`** (`tests/greeter/run.sh`, in the toolchain image) passes
+  every phase:
+  - **Exact answers through `nghttp`:** SayHello with a short, an empty and a
+    300-byte name (two-byte varints), malformed, health for
+    ""/the service/an unknown name, an unknown method, the compressed flag
+    without an encoding, 415 with `accept`, 405 with `allow`.
+  - **Shutdown:** exit 0 after SIGTERM, with the 21 calls counted.
+  - **h2spec 146/146,** against the engine with no KvAsm code.
+  - **Startup refusals:** port `abc`, 0, 65536 or empty, workers 0 or 257
+    (exit 2), and a port in use (exit 1).
+- **`tests/Greeter.Interop`:** xunit.v3 on Microsoft.Testing.Platform, with
+  Grpc.Net.Client 2.84. The Greeter runs in `debian:bookworm-slim` through
+  Testcontainers, with this tree's binary copied in. All 8 tests pass:
+  - SayHello: "world", empty, UTF-8 (Hebrew, CJK, emoji), a 1 MiB name;
+  - a 5 MiB request is RESOURCE_EXHAUSTED "request message too large";
+  - 1,000 concurrent calls on one channel;
+  - health: SERVING, SERVING, and NOT_FOUND "unknown service";
+  - an unknown method is UNIMPLEMENTED.
+- **Measured** (`benchmarks/inprocess/2026-11-17-step-5b`):
+  - **GET:** KvAsm 70.42 ns, step 5a 68.99 ns, step 5b 69.58 ns;
+  - **Health check:** 44.15, 41.58 and 41.72 ns;
+  - the same digests.
+- **Verified:** `tests/kvsuite.sh` passes every phase, including phase 2
+  (graceful shutdown), which reads the lifecycle's log lines.
+
+**Left for milestone B, carried forward:**
+
+- **A generic fuzz matrix for the Greeter.** KvAsm's `fuzz_h2` keeps
+  fuzzing the same engine through KvServer meanwhile.
+- **CI:** a workflow that builds the solution and runs `greeter.sh`, the
+  interop tests and `kvsuite.sh` on Linux.
+- **The engine's `Config`** is still KvAsm's struct, of which the engine reads
+  8 fields. A configuration of the engine's own belongs with the public API
+  (milestone C).
 
 **The plan for the server, as first written:**
 

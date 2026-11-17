@@ -30,6 +30,40 @@ between the network and their code.
 Runtime: Linux x86-64. Build machines: Windows, Linux and macOS, through
 AsmSdk's bundled toolchain.
 
+## What is here today
+
+- **`src/GrpcAsm`:** the engine, a static library (`libgrpcasm.a`). An
+  application defines the hooks in `include/grpcasm_hooks.inc` and a route
+  table (`include/grpcasm_routes.inc`), then hands its process to
+  `ga_server_run`.
+- **`samples/Greeter`:** `helloworld.Greeter/SayHello` on the engine alone. It
+  is the smallest complete application, and the generic test service.
+- **`samples/KvServer`:** KvAsm's key-value service on the engine. It is the
+  reference consumer, held to KvAsm's whole end-to-end suite.
+
+## Building and testing
+
+The solution builds with the .NET SDK on Windows, Linux or macOS. AsmSdk
+brings NASM and the linker as NuGet packages.
+
+```bash
+dotnet build GrpcAsm.slnx -c Release
+```
+
+Then, with Docker:
+
+| Command | What it checks |
+|---|---|
+| `tests/greeter.sh` | The Greeter: exact answers through `nghttp`, h2spec 146/146, startup refusals, a clean SIGTERM |
+| `dotnet test --project tests/Greeter.Interop -c Release` | grpc-dotnet against the Greeter: sizes up to 1 MiB, 1,000 concurrent calls, health, error statuses |
+| `tests/kvsuite.sh <KvAsm checkout>` | KvAsm's end-to-end suite against KvServer: protocol, streaming, shutdown, h2spec, the fuzzer |
+| `benchmarks/inprocess/bench_ga.sh` | The request path timed in process against KvAsm 0.3.0 (see its header) |
+
+- **The shell suites** run in KvAsm's toolchain image:
+  `docker build --target toolchain -t kvasm-toolchain <KvAsm checkout>`.
+- **The .NET tests** start the Greeter in a stock `debian:bookworm-slim`
+  container through Testcontainers.
+
 ## License
 
 [Apache-2.0](LICENSE).

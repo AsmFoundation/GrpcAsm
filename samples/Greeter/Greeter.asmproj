@@ -1,0 +1,20 @@
+<Project Sdk="AsmFoundation.Sdk">
+  <!--
+    Greeter: GrpcAsm's generic test service. It serves helloworld.Greeter/SayHello, the
+    canonical gRPC example (grpc/examples/protos/helloworld.proto), with the engine alone: no
+    store, no KvAsm code. It shows the smallest complete application of the engine (a route
+    table, the hooks, a main that hands the process to ga_server_run), and it is what
+    tests/greeter runs h2spec and grpc-dotnet against.
+
+    Settings come from the environment: GREETER_PORT (default 50051) and GREETER_WORKERS
+    (default 1). Runs on glibc (AsmRuntime=Libc), entered through AsmFoundation.Sdk's crt1.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AsmRuntime>Libc</AsmRuntime>
+    <AsmLibraryName>greeter</AsmLibraryName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/GrpcAsm/GrpcAsm.asmproj" />
+  </ItemGroup>
+</Project>
