@@ -20,7 +20,7 @@
 ; Block layout: [u64 class or POOL_LARGE][u64 user size (large only)][user ...]
 ; The 16-byte header keeps user pointers 16-byte aligned, as malloc's are.
 ; Memory is recycled inside the pool and returned to the system only by
-; kv_pool_destroy (when the worker exits): the pool's size follows the
+; ga_pool_destroy (when the worker exits): the pool's size follows the
 ; worker's peak concurrency, not its lifetime traffic.
 ;
 ; Threading: none. A Pool must only be used by its owning thread.
@@ -29,7 +29,7 @@
 default rel
 bits 64
 
-%include "kvasm.inc"
+%include "grpcasm_sys.inc"
 %include "server.inc"
 
 extern malloc
@@ -39,16 +39,16 @@ extern memset
 
 section .rodata
 align 8
-global kv_pool_struct_size
-kv_pool_struct_size:    dq Pool_size    ; for C tests that embed a Pool
+global ga_pool_struct_size
+ga_pool_struct_size:    dq Pool_size    ; for C tests that embed a Pool
 
 section .text
 
-global kv_pool_malloc
-global kv_pool_free
-global kv_pool_calloc
-global kv_pool_realloc
-global kv_pool_destroy
+global ga_pool_malloc
+global ga_pool_free
+global ga_pool_calloc
+global ga_pool_realloc
+global ga_pool_destroy
 
 ; -----------------------------------------------------------------------------
 ; POOL_CLASS size_reg, out_reg — class index of a user size, or -1 if the
@@ -72,14 +72,14 @@ global kv_pool_destroy
 %endmacro
 
 ; =============================================================================
-; kv_pool_malloc — allocate `size` bytes from a pool.
+; ga_pool_malloc — allocate `size` bytes from a pool.
 ; @param  rdi  size in bytes
 ; @param  rsi  Pool*
 ; @returns rax = 16-byte-aligned pointer, or 0 when out of memory (malloc's
 ;          contract, which every caller relies on: 0 means "fail this
 ;          operation", never a crash).
 ; =============================================================================
-kv_pool_malloc:
+ga_pool_malloc:
     POOL_CLASS rdi, rcx
     test    rcx, rcx
     js      .large
@@ -124,7 +124,7 @@ kv_pool_malloc:
     pop     r13
     pop     r12
     pop     rbx
-    jmp     kv_pool_malloc              ; fits now: a chunk holds many blocks
+    jmp     ga_pool_malloc              ; fits now: a chunk holds many blocks
 .refill_fail:
     pop     r13
     pop     r12
@@ -151,14 +151,14 @@ kv_pool_malloc:
     ret
 
 ; =============================================================================
-; kv_pool_free — return a block to its pool (NULL is ignored).
+; ga_pool_free — return a block to its pool (NULL is ignored).
 ; @param  rdi  pointer from this pool, or NULL
 ; @param  rsi  Pool*
 ; @returns nothing.
 ; @remarks Must be *called* (ABI-aligned stack): large blocks tail-jump into
 ;          glibc free, which requires the standard entry alignment.
 ; =============================================================================
-kv_pool_free:
+ga_pool_free:
     test    rdi, rdi
     jz      .out
     mov     rax, [rdi - POOL_HDR]
@@ -174,11 +174,11 @@ kv_pool_free:
     jmp     free wrt ..plt              ; tail call keeps our caller's alignment
 
 ; =============================================================================
-; kv_pool_calloc — zeroed allocation of nmemb * size bytes.
+; ga_pool_calloc — zeroed allocation of nmemb * size bytes.
 ; @param  rdi  nmemb   @param rsi  size   @param rdx  Pool*
 ; @returns rax = pointer, or 0 when the product overflows or out of memory.
 ; =============================================================================
-kv_pool_calloc:
+ga_pool_calloc:
     push    rbx
     push    r12
     sub     rsp, 8                      ; 2 pushes + 8: rsp 16-aligned for calls
@@ -189,7 +189,7 @@ kv_pool_calloc:
     mov     rbx, rax
     mov     rdi, rax
     mov     rsi, r12
-    call    kv_pool_malloc
+    call    ga_pool_malloc
     test    rax, rax
     jz      .out
     mov     r12, rax
@@ -208,25 +208,25 @@ kv_pool_calloc:
     ret
 
 ; =============================================================================
-; kv_pool_realloc — resize a block, preserving min(old, new) bytes.
+; ga_pool_realloc — resize a block, preserving min(old, new) bytes.
 ; @param  rdi  pointer (NULL = allocate)   @param rsi  new size
 ; @param  rdx  Pool*
 ; @returns rax = pointer (possibly unchanged), or 0 when out of memory — the
 ;          old block is then left intact, as realloc specifies. Size 0 frees
 ;          the block and returns 0.
 ; =============================================================================
-kv_pool_realloc:
+ga_pool_realloc:
     test    rdi, rdi
     jnz     .have
     mov     rdi, rsi
     mov     rsi, rdx
-    jmp     kv_pool_malloc
+    jmp     ga_pool_malloc
 .have:
     test    rsi, rsi
     jnz     .resize
-    sub     rsp, 8                      ; align: kv_pool_free may enter glibc free
+    sub     rsp, 8                      ; align: ga_pool_free may enter glibc free
     mov     rsi, rdx
-    call    kv_pool_free
+    call    ga_pool_free
     add     rsp, 8
     xor     eax, eax
     ret
@@ -257,7 +257,7 @@ kv_pool_realloc:
     mov     r13, rdx                    ; Pool*
     mov     rdi, rsi
     mov     rsi, rdx
-    call    kv_pool_malloc
+    call    ga_pool_malloc
     test    rax, rax
     jz      .grow_out
     mov     r14, rax
@@ -267,7 +267,7 @@ kv_pool_realloc:
     call    memcpy wrt ..plt
     mov     rdi, rbx
     mov     rsi, r13
-    call    kv_pool_free
+    call    ga_pool_free
     mov     rax, r14
 .grow_out:
     add     rsp, 8
@@ -278,14 +278,14 @@ kv_pool_realloc:
     ret
 
 ; =============================================================================
-; kv_pool_destroy — give every chunk back to the system and reset the pool.
+; ga_pool_destroy — give every chunk back to the system and reset the pool.
 ; @param  rdi  Pool*
 ; @returns nothing.
 ; @remarks Only when no block of this pool is in use any more (the worker has
 ;          destroyed all its connections). Large blocks were freed by their
 ;          owners already.
 ; =============================================================================
-kv_pool_destroy:
+ga_pool_destroy:
     push    rbx
     push    r12
     sub     rsp, 8

@@ -181,12 +181,12 @@ struc PbDl
     .has_length:    resd 1
 endstruc
 
-extern kv_pool_free
-extern kv_pool_realloc
-extern kv_pool_malloc
-extern kv_pool_calloc
+extern ga_pool_free
+extern ga_pool_realloc
+extern ga_pool_malloc
+extern ga_pool_calloc
 extern memcpy
-extern kv_keyeq
+extern ga_keyeq
 extern kv_store_hash
 extern kv_store_get
 extern kv_store_write_begin
@@ -213,10 +213,10 @@ extern kv_pb_write_varint
 extern kv_pb_varint_len
 extern kv_crc32c_copy
 extern kv_crc32c_copy_nt
-extern kv_h2n_reply_parts
-extern kv_h2n_reply_static
-extern kv_h2n_reply_headers
-extern kv_h2n_reply_stream
+extern ga_h2n_reply_parts
+extern ga_h2n_reply_static
+extern ga_h2n_reply_headers
+extern ga_h2n_reply_stream
 
 ; PbKv as written by kv_pb_decode_kv (proto.asm)
 struc PbKv
@@ -368,7 +368,7 @@ global kv_grpc_gen_fill
 ; @param  rdi  Conn*
 ; @returns nothing.
 ; @remarks Called at connection teardown (linger and destroy), after
-;          kv_h2n_close: the engine releases its own state (stream map, pend
+;          ga_h2n_close: the engine releases its own state (stream map, pend
 ;          list, HPACK ring) but never the Streams, which live on
 ;          Conn.streams and would otherwise leak. Idempotent: the list, the
 ;          buffered count and the GET batch are cleared, so a lingering
@@ -406,7 +406,7 @@ kv_grpc_free_streams:
 ; @remarks Buffers the Stream does not own are left alone: a borrowed request
 ;          body (ST_BORROWED, h2n's zero-copy path) and a static response
 ;          body (ST_STATIC_RESP, .rodata). Absent buffers are skipped here
-;          rather than handed to kv_pool_free (which would ignore NULL):
+;          rather than handed to ga_pool_free (which would ignore NULL):
 ;          on the fast paths — a unary call whose body arrived in one frame,
 ;          answered straight into the output buffer — neither buffer exists,
 ;          so this is two calls saved on every request.
@@ -421,7 +421,7 @@ stream_free:
     ; buffer owns nothing but the Stream itself — no transfer state, no
     ; unpublished record, no response buffer, and a request body that was
     ; borrowed from the read buffer or never existed. One block goes back to
-    ; the pool, as a tail call (kv_pool_free needs the entry alignment this
+    ; the pool, as a tail call (ga_pool_free needs the entry alignment this
     ; function was entered with, and gets it).
     mov     rax, [rdi + Stream.xfer]
     or      rax, [rdi + Stream.wrec]
@@ -435,7 +435,7 @@ stream_free:
     mov     rax, [rdi + Stream.conn]
     mov     rax, [rax + Conn.worker]
     lea     rsi, [rax + Worker.pool]
-    jmp     kv_pool_free                ; (Stream*, Pool*)
+    jmp     ga_pool_free                ; (Stream*, Pool*)
 .full:
     push    rbx
     push    r12
@@ -468,7 +468,7 @@ stream_free:
     test    rdi, rdi
     jz      .borrowed                   ; no body buffer was ever allocated
     mov     rsi, r12
-    call    kv_pool_free
+    call    ga_pool_free
 .borrowed:
     test    qword [rbx + Stream.flags], ST_STATIC_RESP
     jnz     .static_resp                ; .rodata text: freeing it would crash
@@ -476,11 +476,11 @@ stream_free:
     test    rdi, rdi
     jz      .static_resp                ; answered without a response buffer
     mov     rsi, r12
-    call    kv_pool_free
+    call    ga_pool_free
 .static_resp:
     mov     rdi, rbx
     mov     rsi, r12
-    call    kv_pool_free
+    call    ga_pool_free
     add     rsp, 8
     pop     r12
     pop     rbx
@@ -549,7 +549,7 @@ kv_grpc_stream_append:
     mov     rsi, rdx
     mov     rax, [r14 + Conn.worker]
     lea     rdx, [rax + Worker.pool]
-    call    kv_pool_realloc
+    call    ga_pool_realloc
     pop     r8
     pop     rdx
     test    rax, rax
@@ -574,7 +574,7 @@ kv_grpc_stream_append:
     mov     rdi, [rbx + Stream.req_buf]
     mov     rax, [r14 + Conn.worker]
     lea     rsi, [rax + Worker.pool]
-    call    kv_pool_free
+    call    ga_pool_free
     xor     eax, eax
     mov     [rbx + Stream.req_buf], rax
     mov     [rbx + Stream.req_len], rax
@@ -806,7 +806,7 @@ kv_grpc_dispatch:
     mov     rdi, [rsp + PbKv.key]
     lea     rsi, [v_service]
     mov     edx, v_service_len
-    call    kv_keyeq wrt ..plt
+    call    ga_keyeq wrt ..plt
     test    eax, eax
     jz      .e_noservice
 .health_status:
@@ -821,7 +821,7 @@ kv_grpc_dispatch:
     ; Serves bool replies (found/created/deleted) and the health status enum.
     ; The whole message (5 or 7 bytes) is built on the stack, in the PbKv
     ; area, which is dead by now (the store call consumed the key and value,
-    ; the health check its service name), and framed by kv_h2n_reply_parts
+    ; the health check its service name), and framed by ga_h2n_reply_parts
     ; exactly like a GET miss: no response buffer, so no pool allocation now
     ; and no free when the stream closes. h2n copies the bytes (into the
     ; DATA frame, or into its own buffer when the windows are short), so the
@@ -844,7 +844,7 @@ kv_grpc_dispatch:
     mov     rcx, r13
     xor     r8d, r8d                    ; no body: the head is the message
     xor     r9d, r9d
-    call    kv_h2n_reply_parts wrt ..plt
+    call    ga_h2n_reply_parts wrt ..plt
     jmp     .submitted
 
 .http_405:
@@ -867,7 +867,7 @@ kv_grpc_dispatch:
     mov     rdi, r12
     mov     rsi, rbx
     mov     ecx, 3                      ; rdx = the 405 or 415 fields (set above)
-    call    kv_h2n_reply_static wrt ..plt
+    call    ga_h2n_reply_static wrt ..plt
     jmp     .submitted
 .e_method:
     lea     rdx, [nv_e_method]
@@ -914,7 +914,7 @@ kv_grpc_dispatch:
     ; count still as set above).
     mov     rdi, r12
     mov     rsi, rbx
-    call    kv_h2n_reply_headers wrt ..plt
+    call    ga_h2n_reply_headers wrt ..plt
     jmp     .submitted
 
     ; ---- Upload: every byte was consumed as it arrived; verify and publish ----
@@ -972,7 +972,7 @@ kv_grpc_dispatch:
 ; @param  rdi  Conn*
 ; @returns eax = 0, or -1 if a response could not be queued (out of memory
 ;          in h2n's output buffer: the caller destroys the connection).
-; @remarks Called by kv_h2n_read right after the read's frames were parsed,
+; @remarks Called by ga_h2n_read right after the read's frames were parsed,
 ;          on the connection's thread, while the worker is QSBR-online
 ;          (records stay valid while their values are copied).
 ;          Three passes, a software pipeline across requests:
@@ -1166,7 +1166,7 @@ batch_apply_writes:
 ;          in h2n's output buffer).
 ; @remarks PutResponse{created} / DeleteResponse{deleted}: the bool field as
 ;          08 01, or the empty message for false — 5 or 7 bytes built on the
-;          stack and framed by kv_h2n_reply_parts, exactly like dispatch's
+;          stack and framed by ga_h2n_reply_parts, exactly like dispatch's
 ;          immediate replies (no response buffer, no allocation). A Put the
 ;          full store refused (-ENOSPC) gets RESOURCE_EXHAUSTED; its record
 ;          is freed with the Stream. The Stream may be closed and freed
@@ -1198,7 +1198,7 @@ write_reply:
     mov     rcx, r13
     xor     r8d, r8d                    ; no body: the head is the message
     xor     r9d, r9d
-    call    kv_h2n_reply_parts wrt ..plt
+    call    ga_h2n_reply_parts wrt ..plt
     jmp     .out
 .full:
     mov     rax, [r12 + Conn.worker]
@@ -1207,7 +1207,7 @@ write_reply:
     mov     rsi, rbx
     lea     rdx, [nv_e_full]
     mov     ecx, 4                      ; :status, content-type, grpc-status, grpc-message
-    call    kv_h2n_reply_headers wrt ..plt
+    call    ga_h2n_reply_headers wrt ..plt
 .out:
     test    eax, eax
     jz      .ret
@@ -1298,7 +1298,7 @@ get_execute:
     and     rax, -8
     lea     r8, [r15 + Rec.data + rax]  ; value follows the padded key
     mov     r9, rbp
-    call    kv_h2n_reply_parts wrt ..plt
+    call    ga_h2n_reply_parts wrt ..plt
     jmp     .out
 .missing:
     mov     rdi, rsp
@@ -1310,7 +1310,7 @@ get_execute:
     mov     ecx, GRPC_PREFIX
     xor     r8d, r8d
     xor     r9d, r9d
-    call    kv_h2n_reply_parts wrt ..plt
+    call    ga_h2n_reply_parts wrt ..plt
     jmp     .out
 .too_big:
     mov     rax, [r12 + Conn.worker]
@@ -1319,7 +1319,7 @@ get_execute:
     mov     rsi, rbx
     lea     rdx, [nv_e_bigget]
     mov     ecx, 4
-    call    kv_h2n_reply_headers wrt ..plt
+    call    ga_h2n_reply_headers wrt ..plt
 .out:
     add     rsp, 32
     pop     r15
@@ -1378,13 +1378,13 @@ xfer_release:
     call    kv_store_rec_free wrt ..plt ; NULL (published / never allocated): no-op
     mov     rdi, [rbp + Xfer.key]
     mov     rsi, r14
-    call    kv_pool_free                ; NULL is ignored
+    call    ga_pool_free                ; NULL is ignored
     mov     rax, [rbp + Xfer.reserved]
     sub     [r12 + Conn.up_bytes], rax
 .free:
     mov     rdi, rbp
     mov     rsi, r14
-    call    kv_pool_free
+    call    ga_pool_free
     mov     qword [rbx + Stream.xfer], 0
     pop     r14
     pop     r13
@@ -1405,7 +1405,7 @@ xfer_release:
 refuse:
     mov     rax, [rdi + Conn.worker]
     inc     qword [rax + Worker.st_errors]
-    jmp     kv_h2n_reply_headers wrt ..plt ; tail call, same arguments
+    jmp     ga_h2n_reply_headers wrt ..plt ; tail call, same arguments
 
 ; =============================================================================
 ; upload_refuse — answer an Upload with the status of a refusal code.
@@ -1528,7 +1528,7 @@ kv_grpc_upload_data:
     mov     esi, Xfer_size
     mov     rdx, [r12 + Conn.worker]
     lea     rdx, [rdx + Worker.pool]
-    call    kv_pool_calloc wrt ..plt    ; zeroed: an empty decoder, no flags
+    call    ga_pool_calloc wrt ..plt    ; zeroed: an empty decoder, no flags
     test    rax, rax
     jz      .fatal
     mov     rbp, rax
@@ -1585,7 +1585,7 @@ kv_grpc_upload_data:
     mov     rdi, r12
     mov     rsi, rbx
     mov     ecx, 3                      ; rdx = the 405 or 415 fields
-    call    kv_h2n_reply_static wrt ..plt
+    call    ga_h2n_reply_static wrt ..plt
     test    eax, eax
     jnz     .fatal
     mov     eax, 1                      ; possibly closed and freed already
@@ -1690,13 +1690,13 @@ upload_event:
     mov     rdi, [rbp + Xfer.key]
     mov     rsi, [r12 + Conn.worker]
     lea     rsi, [rsi + Worker.pool]
-    call    kv_pool_free                ; NULL is ignored
+    call    ga_pool_free                ; NULL is ignored
     mov     qword [rbp + Xfer.key], 0
     and     qword [rbp + Xfer.flags], ~XFF_HAVE_KEY
     mov     rdi, r13
     mov     rsi, [r12 + Conn.worker]
     lea     rsi, [rsi + Worker.pool]
-    call    kv_pool_malloc wrt ..plt
+    call    ga_pool_malloc wrt ..plt
     test    rax, rax
     jz      .nomem
     mov     [rbp + Xfer.key], rax
@@ -1865,7 +1865,7 @@ ensure_record:
     mov     [rbp + Xfer.reserved], r14
     mov     rdi, [rbp + Xfer.key]
     lea     rsi, [r13 + Worker.pool]
-    call    kv_pool_free
+    call    ga_pool_free
     mov     qword [rbp + Xfer.key], 0
 .ok:
     xor     eax, eax
@@ -1977,7 +1977,7 @@ upload_finish:
     lea     ecx, [r13 + GRPC_PREFIX]
     xor     r8d, r8d
     xor     r9d, r9d
-    call    kv_h2n_reply_parts wrt ..plt
+    call    ga_h2n_reply_parts wrt ..plt
     jmp     .out
 .refuse:
     mov     rdi, r12
@@ -2056,7 +2056,7 @@ download_start:
     mov     esi, Xfer_size
     mov     rdx, [r12 + Conn.worker]
     lea     rdx, [rdx + Worker.pool]
-    call    kv_pool_calloc wrt ..plt
+    call    ga_pool_calloc wrt ..plt
     test    rax, rax
     jz      .unpin_fatal
     mov     [rbx + Stream.xfer], rax    ; from here on stream_free unpins
@@ -2088,7 +2088,7 @@ download_start:
     or      qword [rbx + Stream.flags], ST_GEN
     mov     rdi, r12
     mov     rsi, rbx
-    call    kv_h2n_reply_stream wrt ..plt
+    call    ga_h2n_reply_stream wrt ..plt
     jmp     .out
 .not_found:
     mov     rdi, r12

@@ -49,7 +49,7 @@
 default rel
 bits 64
 
-%include "kvasm.inc"
+%include "grpcasm_sys.inc"
 %include "server.inc"
 %include "hpack.inc"
 
@@ -57,14 +57,14 @@ extern malloc
 extern realloc
 extern memcpy
 extern memcmp
-extern kv_keyeq
-extern kv_pool_malloc
-extern kv_pool_free
-extern kv_pool_calloc
-extern kv_pool_realloc
-extern kv_hpack_init
-extern kv_hpack_free
-extern kv_hpack_decode
+extern ga_keyeq
+extern ga_pool_malloc
+extern ga_pool_free
+extern ga_pool_calloc
+extern ga_pool_realloc
+extern ga_hpack_init
+extern ga_hpack_free
+extern ga_hpack_decode
 extern kv_grpc_dispatch
 extern kv_grpc_run_batch
 extern kv_grpc_stream_append
@@ -124,7 +124,7 @@ extern kv_grpc_gen_fill
 %define H2F_TSU             8           ; next header block starts with a size update to 0
 ; An early drain (out_try_drain) found the socket full during this read: no
 ; further attempt until the next read, so a slow reader costs one refused
-; sendto per read instead of one per response. Cleared by kv_h2n_read.
+; sendto per read instead of one per response. Cleared by ga_h2n_read.
 %define H2F_OUT_FULL        16
 
 %define MSG_NOSIGNAL        0x4000      ; sendto: a vanished peer must not SIGPIPE us
@@ -183,24 +183,24 @@ v_grpc:         db "application/grpc"
 
 section .text
 
-global kv_h2n_open
-global kv_h2n_close
-global kv_h2n_read
-global kv_h2n_pump
-global kv_h2n_finished
-global kv_h2n_goaway
-global kv_h2n_reply_parts
-global kv_h2n_reply_buf
-global kv_h2n_reply_static
-global kv_h2n_reply_headers
-global kv_h2n_reply_stream
+global ga_h2n_open
+global ga_h2n_close
+global ga_h2n_read
+global ga_h2n_pump
+global ga_h2n_finished
+global ga_h2n_goaway
+global ga_h2n_reply_parts
+global ga_h2n_reply_buf
+global ga_h2n_reply_static
+global ga_h2n_reply_headers
+global ga_h2n_reply_stream
 
 ; =============================================================================
-; kv_h2n_open — set up HTTP/2 on an accepted connection.
+; ga_h2n_open — set up HTTP/2 on an accepted connection.
 ;
 ; @param  rdi  Conn* (zeroed by calloc; fd, worker, out_buf already set)
 ; @returns eax = 0, or -1 when out of memory (the caller closes the socket
-;          after kv_h2n_close, which handles a half-initialized state).
+;          after ga_h2n_close, which handles a half-initialized state).
 ; @remarks Queues the server connection preface: SETTINGS
 ;          (MAX_CONCURRENT_STREAMS from Config, a 1 MiB INITIAL_WINDOW_SIZE,
 ;          an advisory MAX_HEADER_LIST_SIZE), then a WINDOW_UPDATE raising
@@ -208,7 +208,7 @@ global kv_h2n_reply_stream
 ;          Allocates the worker's Huffman scratch on first use (freed with
 ;          the worker).
 ; =============================================================================
-kv_h2n_open:
+ga_h2n_open:
     push    rbx
     push    r12
     push    r13
@@ -243,14 +243,14 @@ kv_h2n_open:
     lea     rdi, [rbx + Conn.h2 + H2.hpack]
     lea     rsi, [r12 + Worker.pool]
     mov     edx, HPACK_TABLE
-    call    kv_hpack_init wrt ..plt
+    call    ga_hpack_init wrt ..plt
     test    rax, rax
     jnz     .fail
     ; Stream map: 16 slots to start; map_insert doubles it with concurrency.
     mov     edi, 16
     mov     esi, 8
     lea     rdx, [r12 + Worker.pool]
-    call    kv_pool_calloc wrt ..plt
+    call    ga_pool_calloc wrt ..plt
     test    rax, rax
     jz      .fail
     mov     [rbx + Conn.h2 + H2.map], rax
@@ -299,7 +299,7 @@ kv_h2n_open:
     ret
 
 ; =============================================================================
-; kv_h2n_close — release the engine's per-connection memory. Idempotent.
+; ga_h2n_close — release the engine's per-connection memory. Idempotent.
 ;
 ; @param  rdi  Conn*
 ; @returns nothing.
@@ -308,23 +308,23 @@ kv_h2n_open:
 ;          Called from linger and destroy paths, possibly both, so every
 ;          pointer is cleared after its release.
 ; =============================================================================
-kv_h2n_close:
+ga_h2n_close:
     push    rbx
     push    r12
     sub     rsp, 8                      ; 2 pushes + 8: aligned for calls
     mov     rbx, rdi
     mov     r12, [rbx + Conn.worker]
     lea     rdi, [rbx + Conn.h2 + H2.hpack]
-    call    kv_hpack_free wrt ..plt     ; no-op when never initialized
+    call    ga_hpack_free wrt ..plt     ; no-op when never initialized
     mov     rdi, [rbx + Conn.h2 + H2.map]
     lea     rsi, [r12 + Worker.pool]
-    call    kv_pool_free wrt ..plt      ; NULL is ignored
+    call    ga_pool_free wrt ..plt      ; NULL is ignored
     mov     rdi, [rbx + Conn.h2 + H2.hb_buf]
     lea     rsi, [r12 + Worker.pool]
-    call    kv_pool_free wrt ..plt
+    call    ga_pool_free wrt ..plt
     mov     rdi, [rbx + Conn.h2 + H2.carry]
     lea     rsi, [r12 + Worker.pool]
-    call    kv_pool_free wrt ..plt
+    call    ga_pool_free wrt ..plt
     xor     eax, eax
     mov     [rbx + Conn.h2 + H2.map], rax
     mov     [rbx + Conn.h2 + H2.hb_buf], rax
@@ -341,7 +341,7 @@ kv_h2n_close:
     ret
 
 ; =============================================================================
-; kv_h2n_finished — may the worker close this connection gracefully now?
+; ga_h2n_finished — may the worker close this connection gracefully now?
 ;
 ; @param  rdi  Conn*
 ; @returns eax = 1 after a connection error, or once GOAWAY was sent or
@@ -350,7 +350,7 @@ kv_h2n_close:
 ;          the final GOAWAY (if any) is already on the wire: the session
 ;          wants neither to read nor to write any more.
 ; =============================================================================
-kv_h2n_finished:
+ga_h2n_finished:
     mov     rax, [rdi + Conn.h2 + H2.flags]
     test    eax, H2F_CLOSING
     jnz     .yes
@@ -366,7 +366,7 @@ kv_h2n_finished:
     ret
 
 ; =============================================================================
-; kv_h2n_goaway — queue GOAWAY(last stream id, code) (drain, idle timeout).
+; ga_h2n_goaway — queue GOAWAY(last stream id, code) (drain, idle timeout).
 ;
 ; @param  rdi  Conn*   @param esi  error code   @param edx  terminate: 1 =
 ;              close as soon as it is sent (idle timeout), 0 = let the
@@ -376,7 +376,7 @@ kv_h2n_finished:
 ;          the peer retries them elsewhere. Nothing is sent after a
 ;          connection error (already closing).
 ; =============================================================================
-kv_h2n_goaway:
+ga_h2n_goaway:
     test    qword [rdi + Conn.h2 + H2.flags], H2F_CLOSING
     jnz     .done
     mov     eax, H2F_GOAWAY_SENT
@@ -390,7 +390,7 @@ kv_h2n_goaway:
     ret
 
 ; =============================================================================
-; kv_h2n_read — read one chunk from a connection and process it.
+; ga_h2n_read — read one chunk from a connection and process it.
 ;
 ; @param  rdi  Worker*   @param rsi  Conn*
 ; @returns rax = 0 (processed or nothing to read: flush next), -1 (destroy
@@ -404,7 +404,7 @@ kv_h2n_goaway:
 ;          After a connection error, input is read and discarded until the
 ;          worker closes (the final GOAWAY is flushed first).
 ; =============================================================================
-kv_h2n_read:
+ga_h2n_read:
     push    rbx
     push    rbp
     push    r12
@@ -657,7 +657,7 @@ h2_process:
     mov     rsi, r15
     mov     rdx, [rbx + Conn.worker]
     lea     rdx, [rdx + Worker.pool]
-    call    kv_pool_realloc wrt ..plt
+    call    ga_pool_realloc wrt ..plt
     test    rax, rax
     jz      .fatal
     mov     [rbx + Conn.h2 + H2.carry], rax
@@ -785,7 +785,7 @@ h2_process:
     cmp     qword [rdx + Stream.clen], 0
     jge     .next                       ; a declared content-length: the loop checks it
     ; Three of the loop's checks cannot fail here and are not repeated: the
-    ; connection is not closing (kv_h2n_read never enters with H2F_CLOSING
+    ; connection is not closing (ga_h2n_read never enters with H2F_CLOSING
     ; set, and a block that raised a connection error returned no stream);
     ; and this stream has had no DATA yet, so nothing is buffered
     ; (req_len 0) and ST_TOO_LARGE — which only kv_grpc_stream_append sets —
@@ -915,7 +915,7 @@ h2_process:
     ; Zero copy: a whole body in this one frame (nothing buffered before,
     ; END_STREAM here, within max_request) is dispatched in place. The read
     ; buffer outlives everything that uses it: dispatch, and the GET batch
-    ; answered before kv_h2n_read returns (ST_BORROWED).
+    ; answered before ga_h2n_read returns (ST_BORROWED).
     test    byte [rsp + L_FLAGS], FF_END_STREAM
     jz      .d_copy
     cmp     qword [rbp + Stream.req_len], 0
@@ -1557,7 +1557,7 @@ decode_fields:
     lea     rcx, [rsp + 16]
     lea     r8, [field_handler]
     mov     r9, rsp
-    call    kv_hpack_decode wrt ..plt
+    call    ga_hpack_decode wrt ..plt
     test    eax, eax
     js      .out
     test    r12, r12
@@ -1841,7 +1841,7 @@ hb_append:
     mov     rdi, [rbx + Conn.h2 + H2.hb_buf]
     mov     rdx, [rbx + Conn.worker]
     lea     rdx, [rdx + Worker.pool]
-    call    kv_pool_realloc wrt ..plt
+    call    ga_pool_realloc wrt ..plt
     test    rax, rax
     jz      .nomem
     mov     [rbx + Conn.h2 + H2.hb_buf], rax
@@ -2057,7 +2057,7 @@ map_grow:
     mov     esi, 8
     mov     rdx, [rbx + Conn.worker]
     lea     rdx, [rdx + Worker.pool]
-    call    kv_pool_calloc wrt ..plt
+    call    ga_pool_calloc wrt ..plt
     test    rax, rax
     jz      .nomem
     mov     rbp, rax
@@ -2095,7 +2095,7 @@ map_grow:
     mov     rdi, r12
     mov     rsi, [rbx + Conn.worker]
     lea     rsi, [rsi + Worker.pool]
-    call    kv_pool_free wrt ..plt
+    call    ga_pool_free wrt ..plt
     xor     eax, eax
     jmp     .out
 .nomem:
@@ -2193,15 +2193,15 @@ map_remove:
 ;          goes straight into its home map slot. That is every request of a
 ;          warm connection (a freed Stream is the next one's block, and
 ;          client ids land in consecutive free slots); an empty list, a map
-;          due to grow or an occupied home slot take kv_pool_calloc and
+;          due to grow or an occupied home slot take ga_pool_calloc and
 ;          map_insert as before. Why inline, when replacing only the memset
 ;          once saved nothing (1,424 against 1,428 instructions per GET,
 ;          2026-09-27): the cost was never the zeroing but the three calls
-;          around it — kv_pool_calloc, kv_pool_malloc with its size-class
+;          around it — ga_pool_calloc, ga_pool_malloc with its size-class
 ;          BSR, memset — and map_insert's frame.
 ;          Clobbers xmm0.
 ; =============================================================================
-; The pool class of a Stream block, at assembly time (kv_pool_malloc finds
+; The pool class of a Stream block, at assembly time (ga_pool_malloc finds
 ; it with a BSR per call; pool.asm POOL_CLASS: blocks are 64 << class bytes,
 ; header included).
 %if Stream_size + POOL_HDR <= 64
@@ -2229,7 +2229,7 @@ stream_open:
     mov     r13, [rdx + Worker.pool + Pool.free + STREAM_CLASS * 8]
     test    r13, r13
     jz      .carve                      ; no freed block of this class: the allocator carves one
-    mov     rax, [r13]                  ; LIFO pop (kv_pool_malloc's own step): the block's
+    mov     rax, [r13]                  ; LIFO pop (ga_pool_malloc's own step): the block's
     mov     [rdx + Worker.pool + Pool.free + STREAM_CLASS * 8], rax ; header still holds its class
     pxor    xmm0, xmm0                  ; pool blocks are 16-byte aligned
 %assign zoff 0
@@ -2242,7 +2242,7 @@ stream_open:
     mov     edi, 1
     mov     esi, Stream_size
     lea     rdx, [rdx + Worker.pool]
-    call    kv_pool_calloc wrt ..plt
+    call    ga_pool_calloc wrt ..plt
     test    rax, rax
     jz      .out
     mov     r13, rax
@@ -2491,7 +2491,7 @@ pend_unlink:
     ret
 
 ; =============================================================================
-; kv_h2n_pump — frame pending response bytes the windows now allow.
+; ga_h2n_pump — frame pending response bytes the windows now allow.
 ;
 ; @param  rdi  Conn*
 ; @returns eax = 0, or -1 when out of memory.
@@ -2501,7 +2501,7 @@ pend_unlink:
 ;          the connection window closes; a stream blocked on its own window
 ;          stays queued without blocking the others.
 ; =============================================================================
-kv_h2n_pump:
+ga_h2n_pump:
     push    rbx
     push    r12
     push    r13                         ; 3 pushes: aligned for calls
@@ -2536,7 +2536,7 @@ kv_h2n_pump:
     ret
 
 ; =============================================================================
-; kv_h2n_reply_parts — answer a gRPC call whose message is head || body.
+; ga_h2n_reply_parts — answer a gRPC call whose message is head || body.
 ;
 ; @param  rdi  Conn*   @param rsi  Stream*
 ; @param  rdx  head    @param rcx  head length (the 5-byte gRPC prefix and
@@ -2547,11 +2547,11 @@ kv_h2n_pump:
 ;          output buffer when the message fits every window and one frame:
 ;          a GET's value goes from the store record to the socket buffer in
 ;          one copy. Otherwise the message is copied into Stream.resp_buf
-;          and streamed as windows allow (kv_h2n_pump). The stream is closed
+;          and streamed as windows allow (ga_h2n_pump). The stream is closed
 ;          once its trailers are framed. On a failing connection the call
 ;          is simply dropped.
 ; =============================================================================
-kv_h2n_reply_parts:
+ga_h2n_reply_parts:
     push    rbx
     push    rbp
     push    r12
@@ -2575,7 +2575,7 @@ kv_h2n_reply_parts:
     lea     rdi, [r13 + r15]
     mov     rsi, [rbx + Conn.worker]
     lea     rsi, [rsi + Worker.pool]
-    call    kv_pool_malloc wrt ..plt
+    call    ga_pool_malloc wrt ..plt
     test    rax, rax
     jz      .nomem
     mov     [rbp + Stream.resp_buf], rax
@@ -2616,20 +2616,20 @@ kv_h2n_reply_parts:
     ret
 
 ; =============================================================================
-; kv_h2n_reply_buf — answer a gRPC call whose message is in Stream.resp_buf.
+; ga_h2n_reply_buf — answer a gRPC call whose message is in Stream.resp_buf.
 ;
 ; @param  rdi  Conn*   @param rsi  Stream* (resp_buf / resp_len set; the
 ;              buffer is freed with the stream)
 ; @returns eax = 0, or -1 when out of memory.
-; @remarks Same fast and slow paths as kv_h2n_reply_parts, without a second
+; @remarks Same fast and slow paths as ga_h2n_reply_parts, without a second
 ;          copy: for a message that already lives in a pool buffer the
 ;          stream owns. No caller today — Put / Delete / Health replies are
-;          5-7 bytes, built on the stack and sent through kv_h2n_reply_parts,
+;          5-7 bytes, built on the stack and sent through ga_h2n_reply_parts,
 ;          which needs no buffer at all when the windows allow (grpc.asm
 ;          .bool_reply). Kept as the entry point for a large, pre-built
 ;          message.
 ; =============================================================================
-kv_h2n_reply_buf:
+ga_h2n_reply_buf:
     push    rbx
     push    rbp
     sub     rsp, 8                      ; 2 pushes + 8: aligned for calls
@@ -2660,7 +2660,7 @@ kv_h2n_reply_buf:
     ret
 
 ; =============================================================================
-; kv_h2n_reply_static — plain HTTP error with a static body (405 / 415).
+; ga_h2n_reply_static — plain HTTP error with a static body (405 / 415).
 ;
 ; @param  rdi  Conn*   @param rsi  Stream* (resp_buf / resp_len = the
 ;              .rodata body, ST_STATIC_RESP set: never freed)
@@ -2670,7 +2670,7 @@ kv_h2n_reply_buf:
 ;          error has no gRPC trailers (they would be meaningless). A HEAD
 ;          request gets the same headers and no body (RFC 9110 §9.3.2).
 ; =============================================================================
-kv_h2n_reply_static:
+ga_h2n_reply_static:
     push    rbx
     push    rbp
     sub     rsp, 8                      ; 2 pushes + 8: aligned for calls
@@ -2714,7 +2714,7 @@ kv_h2n_reply_static:
     ret
 
 ; =============================================================================
-; kv_h2n_reply_headers — Trailers-Only gRPC error: one HEADERS frame that
+; ga_h2n_reply_headers — Trailers-Only gRPC error: one HEADERS frame that
 ; ends the stream.
 ;
 ; @param  rdi  Conn*   @param rsi  Stream*
@@ -2722,7 +2722,7 @@ kv_h2n_reply_static:
 ;              grpc-message[, grpc-accept-encoding])   @param ecx  count
 ; @returns eax = 0, or -1 when out of memory.
 ; =============================================================================
-kv_h2n_reply_headers:
+ga_h2n_reply_headers:
     push    rbx
     push    rbp
     sub     rsp, 8                      ; 2 pushes + 8: aligned for calls
@@ -2752,7 +2752,7 @@ kv_h2n_reply_headers:
     ret
 
 ; =============================================================================
-; kv_h2n_reply_stream — answer with HEADERS now and a generated body as the
+; ga_h2n_reply_stream — answer with HEADERS now and a generated body as the
 ; windows allow (Download).
 ;
 ; @param  rdi  Conn*
@@ -2767,7 +2767,7 @@ kv_h2n_reply_headers:
 ;          stream (its transfer state — the pin — is released with it). On a
 ;          failing connection the call is simply dropped the same way.
 ; =============================================================================
-kv_h2n_reply_stream:
+ga_h2n_reply_stream:
     test    qword [rdi + Conn.h2 + H2.flags], H2F_CLOSING
     jnz     .drop
     jmp     reply_slow                  ; tail call: HEADERS, then emit_progress
@@ -3113,7 +3113,7 @@ reply_fast:
     mov     rdi, r15
     mov     rsi, [rbx + Conn.worker]
     lea     rsi, [rsi + Worker.pool]
-    call    kv_pool_malloc wrt ..plt
+    call    ga_pool_malloc wrt ..plt
     test    rax, rax
     jz      .nomem
     mov     [rbp + Stream.resp_buf], rax
@@ -3530,7 +3530,7 @@ encode_nv:
     mov     rdi, [r12 + HdrField.name]
     lea     rsi, [s_status]
     mov     edx, 7
-    call    kv_keyeq wrt ..plt
+    call    ga_keyeq wrt ..plt
     test    eax, eax
     jz      .not_status
     cmp     qword [r12 + HdrField.valuelen], 3
@@ -3538,7 +3538,7 @@ encode_nv:
     mov     rdi, [r12 + HdrField.value]
     lea     rsi, [v_200]
     mov     edx, 3
-    call    kv_keyeq wrt ..plt
+    call    ga_keyeq wrt ..plt
     test    eax, eax
     jz      .status_literal
     mov     byte [r15], 0x88            ; static entry 8
@@ -3554,7 +3554,7 @@ encode_nv:
     mov     rdi, [r12 + HdrField.name]
     lea     rsi, [s_ctype]
     mov     edx, 12
-    call    kv_keyeq wrt ..plt
+    call    ga_keyeq wrt ..plt
     test    eax, eax
     jz      .new_name
     cmp     qword [r12 + HdrField.valuelen], 16
@@ -3562,7 +3562,7 @@ encode_nv:
     mov     rdi, [r12 + HdrField.value]
     lea     rsi, [v_grpc]
     mov     edx, 16
-    call    kv_keyeq wrt ..plt
+    call    ga_keyeq wrt ..plt
     test    eax, eax
     jz      .ctype_literal
     mov     rax, [rbx + Conn.h2 + H2.enc]
@@ -3719,7 +3719,7 @@ out_reserve:
 ;          (out_off advanced), exactly the states it already handles. A send
 ;          error is left for that flush to meet again and act on.
 ;          Footgun: one refused send sets H2F_OUT_FULL, and every later call
-;          returns 1 without a syscall until kv_h2n_read clears it — callers
+;          returns 1 without a syscall until ga_h2n_read clears it — callers
 ;          must not expect a retry within the same read.
 ;          Replies waiting on the pend list keep their turn: with any queued,
 ;          nothing is sent here and the caller buffers as before.

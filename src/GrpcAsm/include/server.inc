@@ -3,7 +3,7 @@
 ; connection, gRPC stream) and their tunables.
 ;
 ; Ownership rules (the whole concurrency story of the network layer):
-;   * Config and the HPACK/Huffman tables (kv_hpack_global_init) are built by
+;   * Config and the HPACK/Huffman tables (ga_hpack_global_init) are built by
 ;     main before any worker starts and are read-only afterwards — shared by
 ;     all threads.
 ;   * Everything else (Worker, Conn with its HTTP/2 state, Stream) belongs to
@@ -95,7 +95,7 @@ struc Pool
     .free:              resq POOL_CLASSES ; LIFO free list per class
     .bump:              resq 1          ; next unused byte of the current chunk
     .bump_end:          resq 1
-    .chunks:            resq 1          ; list of chunks (freed by kv_pool_destroy)
+    .chunks:            resq 1          ; list of chunks (freed by ga_pool_destroy)
 endstruc
 
 struc Worker
@@ -222,7 +222,7 @@ endstruc
 
 ; ---- HdrField: one response header field, for the error-path replies ----------
 ; grpc.asm's static header tables (Trailers-Only gRPC errors, 405/415) are
-; arrays of these, handed to kv_h2n_reply_headers / kv_h2n_reply_static;
+; arrays of these, handed to ga_h2n_reply_headers / ga_h2n_reply_static;
 ; h2n.asm's encode_nv HPACK-encodes them. Strings are not NUL-terminated.
 struc HdrField
     .name:              resq 1          ; const char*

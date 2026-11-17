@@ -40,7 +40,7 @@ bits 64
 %define ALT_MUL     0x9E3779B97F4A7C15      ; tag -> bucket-offset mixer
 %define GEN_LIMIT   0x0000000000FFFFFF      ; 24-bit visited-set generation
 
-extern kv_keyeq
+extern ga_keyeq
 
 ; -----------------------------------------------------------------------------
 ; Scan mode: how readers match a key's tag against the candidate buckets.
@@ -440,8 +440,8 @@ kv_cuckoo_get:
 ;              B1 hits). Under the batched GET path both lines are prefetched
 ;              anyway; a lone lookup pays for B2's line, in parallel with B1.
 ;          Candidates are confirmed exactly as before (slot non-zero, same
-;          length, kv_keyeq), so a tag collision never returns a wrong record.
-;          Uses r9-r11 and xmm0/xmm7 as scratch: kv_keyeq clobbers only rax,
+;          length, ga_keyeq), so a tag collision never returns a wrong record.
+;          Uses r9-r11 and xmm0/xmm7 as scratch: ga_keyeq clobbers only rax,
 ;          rcx and r8, so the match mask survives in r11 across calls.
 ; =============================================================================
 kv_cuckoo_get_sse2:
@@ -491,7 +491,7 @@ kv_cuckoo_get_sse2:
     jne     .next
     lea     rdi, [r9 + Rec.data]
     mov     rsi, r12
-    call    kv_keyeq wrt ..plt          ; clobbers rax, rcx, r8 only
+    call    ga_keyeq wrt ..plt          ; clobbers rax, rcx, r8 only
     test    eax, eax
     jz      .next
     mov     rax, r9
@@ -710,7 +710,7 @@ cuckoo_scan_bucket:
     jz      .none
     bsf     rcx, r11
     shr     ecx, 3
-    mov     r10, rcx                    ; slot index survives kv_keyeq
+    mov     r10, rcx                    ; slot index survives ga_keyeq
     lea     rax, [r11 - 1]
     and     r11, rax                    ; consume this hit
     mov     r9, [rbx + Bucket.slot + r10*8]
@@ -721,7 +721,7 @@ cuckoo_scan_bucket:
     jne     .next
     lea     rdi, [r9 + Rec.data]
     mov     rsi, r12
-    call    kv_keyeq wrt ..plt          ; clobbers rax, rcx, r8 only
+    call    ga_keyeq wrt ..plt          ; clobbers rax, rcx, r8 only
     test    eax, eax
     jz      .next
     mov     rax, r9

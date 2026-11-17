@@ -51,11 +51,11 @@ extern getenv
 extern strcmp
 extern sched_getaffinity
 extern __sched_cpucount
-extern kv_logb_init
-extern kv_logb_str
-extern kv_logb_cstr
-extern kv_logb_emit
-extern kv_logbuf_size
+extern ga_logb_init
+extern ga_logb_str
+extern ga_logb_cstr
+extern ga_logb_emit
+extern ga_logbuf_size
 
 %define MAX_WORKERS     256
 %define CPUSET_BYTES    128             ; glibc cpu_set_t (1024 CPUs)
@@ -173,7 +173,7 @@ choices_end:
 section .text
 
 global kv_config_load
-extern kv_logb_u64
+extern ga_logb_u64
 
 ; =============================================================================
 ; kv_config_load — fill a Config from the environment.
@@ -304,42 +304,42 @@ kv_config_load:
 
 .invalid:
     ; ts=... level=ERROR msg="invalid setting" name=X value=Y allowed=MIN..MAX
-    call    kv_logbuf_size
+    call    ga_logbuf_size
     sub     rsp, rax
     mov     r15, rax
     mov     rdi, rsp
     lea     rsi, [lvl_error]
-    call    kv_logb_init
+    call    ga_logb_init
     mov     rdi, rsp
     lea     rsi, [m_invalid]
     mov     edx, m_invalid_len
-    call    kv_logb_str
+    call    ga_logb_str
     mov     rdi, rsp
     mov     rsi, [r12 + Setting.name]
-    call    kv_logb_cstr
+    call    ga_logb_cstr
     mov     rdi, rsp
     lea     rsi, [m_value]
     mov     edx, 7
-    call    kv_logb_str
+    call    ga_logb_str
     mov     rdi, rsp
     mov     rsi, r13
-    call    kv_logb_cstr
+    call    ga_logb_cstr
     mov     rdi, rsp
     lea     rsi, [m_range]
     mov     edx, 9
-    call    kv_logb_str
+    call    ga_logb_str
     mov     rdi, rsp
     mov     rsi, [r12 + Setting.min]
-    call    kv_logb_u64
+    call    ga_logb_u64
     mov     rdi, rsp
     lea     rsi, [m_dots]
     mov     edx, 2
-    call    kv_logb_str
+    call    ga_logb_str
     mov     rdi, rsp
     mov     rsi, [r12 + Setting.max]
-    call    kv_logb_u64
+    call    ga_logb_u64
     mov     rdi, rsp
-    call    kv_logb_emit
+    call    ga_logb_emit
     add     rsp, r15
     mov     rax, -EINVAL
 .out:
@@ -363,35 +363,35 @@ log_invalid_choice:
     push    r13                         ; 3 pushes: rsp 16-aligned for calls
     mov     r12, rdi
     mov     r13, rsi
-    call    kv_logbuf_size
+    call    ga_logbuf_size
     sub     rsp, rax                    ; LogBuf on the stack (size keeps alignment)
     mov     rbx, rax
     mov     rdi, rsp
     lea     rsi, [lvl_error]
-    call    kv_logb_init
+    call    ga_logb_init
     mov     rdi, rsp
     lea     rsi, [m_invalid]
     mov     edx, m_invalid_len
-    call    kv_logb_str
+    call    ga_logb_str
     mov     rdi, rsp
     mov     rsi, [r12 + Choice.name]
-    call    kv_logb_cstr
+    call    ga_logb_cstr
     mov     rdi, rsp
     lea     rsi, [m_value]
     mov     edx, 7
-    call    kv_logb_str
+    call    ga_logb_str
     mov     rdi, rsp
     mov     rsi, r13
-    call    kv_logb_cstr
+    call    ga_logb_cstr
     mov     rdi, rsp
     lea     rsi, [m_range]
     mov     edx, 9
-    call    kv_logb_str
+    call    ga_logb_str
     mov     rdi, rsp
     mov     rsi, [r12 + Choice.allowed]
-    call    kv_logb_cstr
+    call    ga_logb_cstr
     mov     rdi, rsp
-    call    kv_logb_emit
+    call    ga_logb_emit
     add     rsp, rbx
     pop     r13
     pop     r12
@@ -413,46 +413,46 @@ log_upload_budget:
     push    r13                         ; 3 pushes: rsp 16-aligned for calls
     mov     r12, rdi
     mov     r13, rsi
-    call    kv_logbuf_size
+    call    ga_logbuf_size
     sub     rsp, rax                    ; LogBuf on the stack (size keeps alignment)
     mov     rbx, rax
     mov     rdi, rsp
     lea     rsi, [lvl_error]
-    call    kv_logb_init
+    call    ga_logb_init
     mov     rdi, rsp
     lea     rsi, [m_invalid]
     mov     edx, m_invalid_len
-    call    kv_logb_str
+    call    ga_logb_str
     mov     rdi, rsp
     lea     rsi, [n_maxup]
-    call    kv_logb_cstr
+    call    ga_logb_cstr
     mov     rdi, rsp
     lea     rsi, [m_value]
     mov     edx, 7
-    call    kv_logb_str
+    call    ga_logb_str
     mov     rdi, rsp
     mov     rsi, r12
-    call    kv_logb_u64
+    call    ga_logb_u64
     mov     rdi, rsp
     lea     rsi, [m_range]
     mov     edx, 9
-    call    kv_logb_str
+    call    ga_logb_str
     mov     rdi, rsp
     xor     esi, esi
-    call    kv_logb_u64
+    call    ga_logb_u64
     mov     rdi, rsp
     lea     rsi, [m_dots]
     mov     edx, 2
-    call    kv_logb_str
+    call    ga_logb_str
     mov     rdi, rsp
     mov     rsi, r13
-    call    kv_logb_u64
+    call    ga_logb_u64
     mov     rdi, rsp
     lea     rsi, [m_upbudget]
     mov     edx, m_upbudget_len
-    call    kv_logb_str
+    call    ga_logb_str
     mov     rdi, rsp
-    call    kv_logb_emit
+    call    ga_logb_emit
     add     rsp, rbx
     pop     r13
     pop     r12

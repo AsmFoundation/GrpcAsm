@@ -143,7 +143,7 @@ These ran in a throw-away prototype before this plan was written:
 
 ## Milestone B — GrpcAsm server
 
-**Status (2026-11-17): step 1 of 5 done.**
+**Status (2026-11-17): steps 1 and 2 of 5 done.**
 
 **Step 1 — physical split, no instruction changed (done):**
 
@@ -158,11 +158,28 @@ These ran in a throw-away prototype before this plan was written:
   500-conversation matrix exact, 3,000 fuzzed connections). That is the gate
   for every following step.
 
+**Step 2 — the engine's own names (done):**
+
+- The 37 symbols the engine defines are now `ga_*` in both projects. They
+  are its interface: the `ga_h2n_*` reply functions, `ga_hpack_*`,
+  `ga_pool_*`, `ga_worker_*`, `ga_logb_*`, `ga_keyeq` and others.
+- **The application's hooks keep their `kv_*` names** (`kv_grpc_*`,
+  `kv_qsbr_*`, `kv_store_reclaim*`, `kv_hcache_*`): they are what step 3
+  replaces.
+- **The include split:**
+  - `kvasm.inc` → the engine's `grpcasm_sys.inc` (syscall numbers, errno,
+    mmap) and the application's `kvasm.inc` (key hash, private cache, futex,
+    store structures);
+  - `pbstream.inc` moved to the application.
+
+  The engine assembled without them, which proves it uses nothing of the KV
+  definitions.
+- `kv_tag_match` (the store's tag scan, unused by the engine) moved unchanged
+  to `samples/KvServer/tagmatch.asm`.
+- **Verified:** `tests/kvsuite.sh` passes every phase.
+
 **The next steps:**
 
-- **Step 2:** the engine's own names. `kv_*` becomes `ga_*`, and `kvasm.inc`
-  is split into `grpcasm.inc` (syscalls, errno, mmap) and the KV structures,
-  which move to the application.
 - **Step 3:** the hook interface. The engine stops naming `kv_grpc_*` and the
   store, and calls application hooks instead:
   - per route: request, data, end, fill, release;

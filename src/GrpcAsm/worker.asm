@@ -42,7 +42,7 @@
 default rel
 bits 64
 
-%include "kvasm.inc"
+%include "grpcasm_sys.inc"
 %include "server.inc"
 
 %define SYS_close           3
@@ -101,20 +101,20 @@ extern kv_qsbr_quiescent
 extern kv_store_reclaim
 extern kv_store_reclaim_local
 extern kv_grpc_free_streams
-extern kv_logb_init
-extern kv_logb_str
-extern kv_logb_u64
-extern kv_logb_emit
-extern kv_logbuf_size
-extern kv_pool_destroy
+extern ga_logb_init
+extern ga_logb_str
+extern ga_logb_u64
+extern ga_logb_emit
+extern ga_logbuf_size
+extern ga_pool_destroy
 extern kv_hcache_create
 extern kv_hcache_destroy
-extern kv_h2n_open
-extern kv_h2n_close
-extern kv_h2n_read
-extern kv_h2n_pump
-extern kv_h2n_finished
-extern kv_h2n_goaway
+extern ga_h2n_open
+extern ga_h2n_close
+extern ga_h2n_read
+extern ga_h2n_pump
+extern ga_h2n_finished
+extern ga_h2n_goaway
 
 section .rodata
 lvl_warn:       db "WARN", 0
@@ -138,14 +138,14 @@ int_one:        dd 1
 
 section .text
 
-global kv_port_probe
-global kv_worker_create
-global kv_worker_start
-global kv_worker_stop
-global kv_worker_join
+global ga_port_probe
+global ga_worker_create
+global ga_worker_start
+global ga_worker_stop
+global ga_worker_join
 
 ; =============================================================================
-; kv_port_probe — fail fast if another process already holds the TCP port.
+; ga_port_probe — fail fast if another process already holds the TCP port.
 ;
 ; @param  rdi  port (1..65535, host byte order)
 ; @returns rax = 0 if the port is free, or -errno from socket()/bind()
@@ -165,7 +165,7 @@ global kv_worker_join
 ;          pass — inherent to check-then-act — but never one started while
 ;          another is serving.
 ; =============================================================================
-kv_port_probe:
+ga_port_probe:
     push    rbx
     push    r12
     sub     rsp, 24                     ; sockaddr_in scratch (16) + alignment
@@ -208,7 +208,7 @@ kv_port_probe:
     ret
 
 ; =============================================================================
-; kv_worker_create — allocate a worker and bind its listening socket.
+; ga_worker_create — allocate a worker and bind its listening socket.
 ;
 ; @param  rdi  worker id (also its QSBR reader slot)
 ; @param  rsi  KvTable*          @param rdx  const Config*
@@ -218,7 +218,7 @@ kv_port_probe:
 ;          cannot be bound fails startup synchronously instead of leaving a
 ;          half-working server.
 ; =============================================================================
-kv_worker_create:
+ga_worker_create:
     push    rbx
     push    rbp
     push    r12
@@ -226,7 +226,7 @@ kv_worker_create:
     push    r14
     push    r15                         ; unused; 6 pushes + 24 keep rsp 16-aligned
     sub     rsp, 24                     ; [0..16) sockaddr_in / epoll_event scratch
-    ; Callers run kv_port_probe first: SO_REUSEPORT below would otherwise let
+    ; Callers run ga_port_probe first: SO_REUSEPORT below would otherwise let
     ; this listener silently join a group owned by another process.
     mov     r12, rdi
     mov     r13, rsi
@@ -381,13 +381,13 @@ kv_worker_create:
     ret
 
 ; =============================================================================
-; kv_worker_start — run the worker's event loop on a new thread.
+; ga_worker_start — run the worker's event loop on a new thread.
 ; @param  rdi  Worker*
 ; @returns rax = 0 on success, else the pthread_create error number.
 ; @remarks The new thread inherits main's blocked signal mask, so termination
 ;          signals are only ever delivered to main's sigwaitinfo.
 ; =============================================================================
-kv_worker_start:
+ga_worker_start:
     push    rbx
     mov     rbx, rdi
     lea     rdi, [rbx + Worker.thread]
@@ -399,12 +399,12 @@ kv_worker_start:
     ret
 
 ; =============================================================================
-; kv_worker_stop — ask a worker to drain and exit (async-signal-safe).
+; ga_worker_stop — ask a worker to drain and exit (async-signal-safe).
 ; @param  rdi  Worker*
 ; @returns nothing.
 ; @remarks Rings the eventfd; the worker notices on its next epoll_wait.
 ; =============================================================================
-kv_worker_stop:
+ga_worker_stop:
     sub     rsp, 8
     mov     qword [rsp], 1
     mov     rdi, [rdi + Worker.event_fd]
@@ -416,12 +416,12 @@ kv_worker_stop:
     ret
 
 ; =============================================================================
-; kv_worker_join — wait for a stopped worker and free it.
+; ga_worker_join — wait for a stopped worker and free it.
 ; @param  rdi  Worker*
 ; @param  rsi  uint64_t stats[3] out: accepted, requests, errors (may be NULL)
 ; @returns nothing.
 ; =============================================================================
-kv_worker_join:
+ga_worker_join:
     push    rbx
     push    r12
     sub     rsp, 8
@@ -468,7 +468,7 @@ worker_free:
     mov     rdi, [rbx + Worker.h2_scratch] ; NULL unless a native connection ran
     call    free wrt ..plt
     lea     rdi, [rbx + Worker.pool]    ; every session and stream is gone by now
-    call    kv_pool_destroy wrt ..plt
+    call    ga_pool_destroy wrt ..plt
     mov     rdi, [rbx + Worker.hcache]  ; NULL when caching is off
     call    kv_hcache_destroy wrt ..plt
     mov     rdi, rbx
@@ -517,37 +517,37 @@ log_setup_failure:
     mov     r12, rdi
     mov     r13, rsi
     mov     r14, rdx
-    call    kv_logbuf_size
+    call    ga_logbuf_size
     sub     rsp, rax
     mov     r15, rax
     mov     rbx, rsp
     mov     rdi, rbx
     lea     rsi, [lvl_error]
-    call    kv_logb_init
+    call    ga_logb_init
     mov     rdi, rbx
     lea     rsi, [m_create]
     mov     edx, m_create_len
-    call    kv_logb_str
+    call    ga_logb_str
     mov     rdi, rbx
     mov     rsi, r12
     call    cstr_append
     mov     rdi, rbx
     lea     rsi, [m_errno]
     mov     edx, 7
-    call    kv_logb_str
+    call    ga_logb_str
     mov     rsi, r13
     neg     rsi
     mov     rdi, rbx
-    call    kv_logb_u64
+    call    ga_logb_u64
     mov     rdi, rbx
     lea     rsi, [m_worker]
     mov     edx, 8
-    call    kv_logb_str
+    call    ga_logb_str
     mov     rdi, rbx
     mov     rsi, r14
-    call    kv_logb_u64
+    call    ga_logb_u64
     mov     rdi, rbx
-    call    kv_logb_emit
+    call    ga_logb_emit
     add     rsp, r15
     pop     r15
     pop     r14
@@ -566,7 +566,7 @@ cstr_append:
     inc     rdx
     jmp     .len
 .go:
-    jmp     kv_logb_str wrt ..plt
+    jmp     ga_logb_str wrt ..plt
 
 ; =============================================================================
 ; worker_main — the event loop (thread entry point).
@@ -780,23 +780,23 @@ log_epoll_failure:
     push    r12
     push    r13
     mov     r12, rdi
-    call    kv_logbuf_size
+    call    ga_logbuf_size
     sub     rsp, rax
     mov     r13, rax
     mov     rbx, rsp
     mov     rdi, rbx
     lea     rsi, [lvl_error]
-    call    kv_logb_init
+    call    ga_logb_init
     mov     rdi, rbx
     lea     rsi, [m_epoll]
     mov     edx, m_epoll_len
-    call    kv_logb_str
+    call    ga_logb_str
     mov     rsi, r12
     neg     rsi
     mov     rdi, rbx
-    call    kv_logb_u64
+    call    ga_logb_u64
     mov     rdi, rbx
-    call    kv_logb_emit
+    call    ga_logb_emit
     add     rsp, r13
     pop     r13
     pop     r12
@@ -865,23 +865,23 @@ log_accept_paused:
     push    r12
     push    r13
     mov     r12, rdi
-    call    kv_logbuf_size
+    call    ga_logbuf_size
     sub     rsp, rax
     mov     r13, rax
     mov     rbx, rsp
     mov     rdi, rbx
     lea     rsi, [lvl_warn]
-    call    kv_logb_init
+    call    ga_logb_init
     mov     rdi, rbx
     lea     rsi, [m_accept]
     mov     edx, m_accept_len
-    call    kv_logb_str
+    call    ga_logb_str
     mov     rsi, r12
     neg     rsi
     mov     rdi, rbx
-    call    kv_logb_u64
+    call    ga_logb_u64
     mov     rdi, rbx
-    call    kv_logb_emit
+    call    ga_logb_emit
     add     rsp, r13
     pop     r13
     pop     r12
@@ -932,12 +932,12 @@ conn_open:
     jz      .free_conn
     mov     [rbp + Conn.out_buf], rax
     mov     qword [rbp + Conn.out_cap], OUT_INITIAL
-    ; HTTP/2 state lives in Conn; kv_h2n_open queues the server preface:
+    ; HTTP/2 state lives in Conn; ga_h2n_open queues the server preface:
     ; SETTINGS (stream concurrency, a 1 MiB stream window, an advisory
     ; header-list limit) and a WINDOW_UPDATE raising the connection window to
     ; the per-connection buffering budget.
     mov     rdi, rbp
-    call    kv_h2n_open wrt ..plt
+    call    ga_h2n_open wrt ..plt
     test    eax, eax
     jnz     .free_conn
 
@@ -968,10 +968,10 @@ conn_open:
     call    conn_destroy
     jmp     .out
 .free_conn:
-    ; kv_h2n_close copes with a half-done (or never started) kv_h2n_open: the
+    ; ga_h2n_close copes with a half-done (or never started) ga_h2n_open: the
     ; Conn was calloc'd and Conn.worker is set, so unset parts are NULL.
     mov     rdi, rbp
-    call    kv_h2n_close wrt ..plt
+    call    ga_h2n_close wrt ..plt
     mov     rdi, [rbp + Conn.out_buf]
     call    free wrt ..plt
     mov     rdi, rbp
@@ -997,7 +997,7 @@ conn_open:
 ;          was destroyed and freed here: the caller must forget the pointer).
 ; @remarks Reads at most one chunk per event (level-triggered epoll re-reports
 ;          remaining data), which keeps one busy connection from starving the
-;          others on the same worker. kv_h2n_read parses the chunk and frames
+;          others on the same worker. ga_h2n_read parses the chunk and frames
 ;          the answers into out_buf; nothing is sent here — worker_main sends
 ;          every connection's output together once the batch's input is done
 ;          (see its @remarks for why), so a request batch still costs one
@@ -1019,13 +1019,13 @@ conn_event:
     jnz     .destroy
     jmp     .alive                      ; writable: phase 2 flushes it
 .readable:
-    ; kv_h2n_read does the read itself (after a partial frame carried from
+    ; ga_h2n_read does the read itself (after a partial frame carried from
     ; the previous one), updates Conn.last_active, parses, runs the GET
     ; batch the frames queued and tops up the flow-control windows.
     ; EAGAIN/EINTR come back as 0: nothing new, the connection lives on.
     mov     rdi, rbx
     mov     rsi, rbp
-    call    kv_h2n_read wrt ..plt
+    call    ga_h2n_read wrt ..plt
     test    rax, rax
     js      .destroy                    ; peer closed, socket error, out of memory
 .alive:
@@ -1059,9 +1059,9 @@ conn_event:
 ; @param  rdi  Worker*   @param rsi  Conn*
 ; @returns rax = 0 (idle or waiting for EPOLLOUT), 1 (the session has
 ;          nothing more to read or write: close gracefully), -1 (error:
-;          the peer reset, or kv_h2n_pump ran out of memory).
-; @remarks Most output never waits here: kv_h2n_read frames responses
-;          straight into out_buf while it parses. What kv_h2n_pump adds are
+;          the peer reset, or ga_h2n_pump ran out of memory).
+; @remarks Most output never waits here: ga_h2n_read frames responses
+;          straight into out_buf while it parses. What ga_h2n_pump adds are
 ;          bodies that were waiting for flow-control window or buffer room;
 ;          it stops at OUT_HIGH_WATER, so one connection cannot build an
 ;          unbounded buffer, and the rest stays on the pend list until the
@@ -1130,7 +1130,7 @@ conn_flush:
     ; out_buf is empty: frame what the windows and OUT_HIGH_WATER allow from
     ; the pend list, send it, and repeat until nothing more can be framed.
     mov     rdi, rbp
-    call    kv_h2n_pump wrt ..plt
+    call    ga_h2n_pump wrt ..plt
     test    eax, eax
     js      .error
     mov     rax, [rbp + Conn.out_len]
@@ -1144,7 +1144,7 @@ conn_flush:
     xor     edx, edx
     call    set_interest                ; nothing pending: read again
     mov     rdi, rbp
-    call    kv_h2n_finished wrt ..plt
+    call    ga_h2n_finished wrt ..plt
     test    eax, eax
     jz      .idle
     mov     eax, 1                      ; GOAWAY exchanged, no stream left
@@ -1233,7 +1233,7 @@ conn_linger:
     mov     rbx, rdi
     mov     rbp, rsi
     mov     rdi, rbp
-    call    kv_h2n_close wrt ..plt      ; idempotent: conn_destroy calls it again
+    call    ga_h2n_close wrt ..plt      ; idempotent: conn_destroy calls it again
     mov     rdi, rbp
     call    kv_grpc_free_streams wrt ..plt
     mov     rdi, [rbp + Conn.fd]
@@ -1258,7 +1258,7 @@ conn_linger:
 ; @returns nothing; the Conn is freed, so the caller must have saved
 ;          Conn.next beforehand if it is walking the list.
 ; @remarks close() also removes the fd from epoll (no other reference to it
-;          exists). kv_h2n_close releases the engine's state (stream map,
+;          exists). ga_h2n_close releases the engine's state (stream map,
 ;          pend list, HPACK ring) without touching the gRPC streams, so those
 ;          are freed explicitly afterwards; both calls are idempotent, which
 ;          lets a lingering connection (already closed once) come through here.
@@ -1270,7 +1270,7 @@ conn_destroy:
     mov     rbx, rdi
     mov     rbp, rsi
     mov     rdi, rbp
-    call    kv_h2n_close wrt ..plt      ; idempotent (a lingering one was closed)
+    call    ga_h2n_close wrt ..plt      ; idempotent (a lingering one was closed)
     mov     rdi, rbp
     call    kv_grpc_free_streams wrt ..plt
     mov     rdi, [rbp + Conn.fd]
@@ -1366,7 +1366,7 @@ housekeeping:
     mov     rdi, rbp
     mov     esi, H2_NO_ERROR
     mov     edx, 1                      ; terminate: close once it is sent
-    call    kv_h2n_goaway wrt ..plt     ; (out of memory: closed by the next error)
+    call    ga_h2n_goaway wrt ..plt     ; (out of memory: closed by the next error)
     mov     rdi, rbx
     mov     rsi, rbp
     call    flush_or_close
@@ -1468,7 +1468,7 @@ begin_drain:
     mov     rdi, rbp
     mov     esi, H2_NO_ERROR
     xor     edx, edx                    ; graceful, not terminate
-    call    kv_h2n_goaway wrt ..plt
+    call    ga_h2n_goaway wrt ..plt
     mov     rdi, rbx
     mov     rsi, rbp
     call    flush_or_close

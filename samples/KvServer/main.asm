@@ -4,7 +4,7 @@
 ; Startup (fail fast, in this order, before any client can connect):
 ;   1. ignore SIGPIPE (sockets also use MSG_NOSIGNAL; belt and braces)
 ;   2. load and validate configuration from the environment      (exit 2)
-;   3. refuse a port another process holds (kv_port_probe) — before the
+;   3. refuse a port another process holds (ga_port_probe) — before the
 ;      possibly long snapshot load, so a misconfigured restart fails in
 ;      milliseconds                                               (exit 1)
 ;   4. draw a 16-byte SipHash key from getrandom                 (exit 1)
@@ -56,18 +56,18 @@ extern kv_store_destroy
 extern kv_store_reclaim
 extern kv_store_stats
 extern kv_snapshot_load
-extern kv_hpack_global_init
-extern kv_port_probe
-extern kv_worker_create
-extern kv_worker_start
-extern kv_worker_stop
-extern kv_worker_join
-extern kv_logb_init
-extern kv_logb_str
-extern kv_logb_cstr
-extern kv_logb_u64
-extern kv_logb_emit
-extern kv_logbuf_size
+extern ga_hpack_global_init
+extern ga_port_probe
+extern ga_worker_create
+extern ga_worker_start
+extern ga_worker_stop
+extern ga_worker_join
+extern ga_logb_init
+extern ga_logb_str
+extern ga_logb_cstr
+extern ga_logb_u64
+extern ga_logb_emit
+extern ga_logbuf_size
 
 ; main's frame
 %define F_SET       0               ; sigset_t (128 bytes)
@@ -166,25 +166,25 @@ global main
     lea     rdi, [rsp + F_LOG]
     lea     rsi, [%1]
     mov     edx, %2
-    call    kv_logb_str wrt ..plt
+    call    ga_logb_str wrt ..plt
 %endmacro
 
 ; LOGNUM reg_or_mem — append an unsigned number.
 %macro LOGNUM 1
     lea     rdi, [rsp + F_LOG]
     mov     rsi, %1
-    call    kv_logb_u64 wrt ..plt
+    call    ga_logb_u64 wrt ..plt
 %endmacro
 
 ; LOGBEGIN level_label / LOGEND
 %macro LOGBEGIN 1
     lea     rdi, [rsp + F_LOG]
     lea     rsi, [%1]
-    call    kv_logb_init wrt ..plt
+    call    ga_logb_init wrt ..plt
 %endmacro
 %macro LOGEND 0
     lea     rdi, [rsp + F_LOG]
-    call    kv_logb_emit wrt ..plt
+    call    ga_logb_emit wrt ..plt
 %endmacro
 
 ; =============================================================================
@@ -249,7 +249,7 @@ main:
     call    crc_mode_name
     lea     rdi, [rsp + F_LOG]
     mov     rsi, rax
-    call    kv_logb_cstr wrt ..plt
+    call    ga_logb_cstr wrt ..plt
     LOGLIT  m_f_crc2, L_f_crc2
     LOGEND
     mov     eax, 2
@@ -302,7 +302,7 @@ main:
     lea     rax, [v_sse2]
     cmp     qword [r15 + Config.scan_mode], 0
     cmovne  rsi, rax
-    call    kv_logb_cstr wrt ..plt
+    call    ga_logb_cstr wrt ..plt
     LOGLIT  k_l1, 15
     LOGNUM  [r15 + Config.cache_l1_bits]
     LOGLIT  k_l2, 15
@@ -314,7 +314,7 @@ main:
     call    crc_mode_name
     lea     rdi, [rsp + F_LOG]
     mov     rsi, rax
-    call    kv_logb_cstr wrt ..plt
+    call    ga_logb_cstr wrt ..plt
     LOGLIT  k_snapshot, 10
     lea     rdi, [rsp + F_LOG]
     mov     rsi, [r15 + Config.snapshot]
@@ -322,7 +322,7 @@ main:
     jnz     .snap_name
     lea     rsi, [k_none]
 .snap_name:
-    call    kv_logb_cstr wrt ..plt
+    call    ga_logb_cstr wrt ..plt
     ; Last on the line: the end-to-end suite matches "crc32c=<mode> snapshot=".
     LOGLIT  k_hash, 6
     call    kv_hash_mode_get wrt ..plt
@@ -331,13 +331,13 @@ main:
     cmp     eax, 1                      ; KV_HASH_AES
     cmove   rsi, rdx
     lea     rdi, [rsp + F_LOG]
-    call    kv_logb_cstr wrt ..plt
+    call    ga_logb_cstr wrt ..plt
     LOGEND
 
-    ; Refuse to join another process's SO_REUSEPORT group (kv_port_probe
+    ; Refuse to join another process's SO_REUSEPORT group (ga_port_probe
     ; explains the split-brain this prevents).
     mov     rdi, [r15 + Config.port]
-    call    kv_port_probe wrt ..plt
+    call    ga_port_probe wrt ..plt
     test    rax, rax
     jz      .port_ok
     neg     rax
@@ -457,7 +457,7 @@ main:
 
     ; The HPACK decoder (hpack.asm) classifies the 61 static entries once,
     ; before any worker could decode a header block (read-only after).
-    call    kv_hpack_global_init wrt ..plt
+    call    ga_hpack_global_init wrt ..plt
 
     mov     rdi, [r15 + Config.workers]
     mov     esi, 8
@@ -472,7 +472,7 @@ main:
     mov     rdi, r12
     mov     rsi, rbx
     mov     rdx, r15
-    call    kv_worker_create wrt ..plt
+    call    ga_worker_create wrt ..plt
     test    rax, rax
     jz      .worker_failed
     mov     [r14 + r12*8], rax
@@ -484,7 +484,7 @@ main:
     cmp     r12, [r15 + Config.workers]
     jae     .running
     mov     rdi, [r14 + r12*8]
-    call    kv_worker_start wrt ..plt
+    call    ga_worker_start wrt ..plt
     test    eax, eax
     jnz     .worker_failed              ; (pthread_create failure: fatal)
     inc     r12
@@ -516,7 +516,7 @@ main:
     cmp     r12, [r15 + Config.workers]
     jae     .join
     mov     rdi, [r14 + r12*8]
-    call    kv_worker_stop wrt ..plt
+    call    ga_worker_stop wrt ..plt
     inc     r12
     jmp     .stop_next
 .join:
@@ -530,7 +530,7 @@ main:
     jae     .joined
     mov     rdi, [r14 + r12*8]
     lea     rsi, [rsp + F_STATS]
-    call    kv_worker_join wrt ..plt
+    call    ga_worker_join wrt ..plt
     mov     rax, [rsp + F_STATS]
     add     [rsp + F_TOTALS], rax
     mov     rax, [rsp + F_STATS + 8]

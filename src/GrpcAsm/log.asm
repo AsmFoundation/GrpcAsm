@@ -11,16 +11,16 @@
 ; Usage from assembly:
 ;     lea rdi, [rsp]          ; LogBuf on the stack
 ;     lea rsi, [lvl_info]
-;     call kv_logb_init
-;     LOGS "msg=listening port="   (macro in log.inc-style: kv_logb_str)
+;     call ga_logb_init
+;     LOGS "msg=listening port="   (macro in log.inc-style: ga_logb_str)
 ;     ...
-;     call kv_logb_emit
+;     call ga_logb_emit
 ; =============================================================================
 
 default rel
 bits 64
 
-%include "kvasm.inc"
+%include "grpcasm_sys.inc"
 %include "log.inc"                      ; LOG_CAP, LogBuf, LOGBUF_BYTES
 
 %define CLOCK_REALTIME  0
@@ -33,32 +33,32 @@ str_level:  db " level="
 
 section .text
 
-global kv_logb_init
-global kv_logb_str
-global kv_logb_cstr
-global kv_logb_u64
-global kv_logb_emit
-global kv_fmt_u64
-global kv_logbuf_size
+global ga_logb_init
+global ga_logb_str
+global ga_logb_cstr
+global ga_logb_u64
+global ga_logb_emit
+global ga_fmt_u64
+global ga_logbuf_size
 
 ; =============================================================================
-; kv_logbuf_size — bytes a caller must reserve for a LogBuf.
+; ga_logbuf_size — bytes a caller must reserve for a LogBuf.
 ; @returns rax = LOGBUF_BYTES (LogBuf_size rounded to 16 so a caller that does
 ;          `sub rsp, rax` keeps its stack 16-byte aligned for further calls).
 ; @remarks For callers whose frame size is computed at run time (config.asm,
 ;          snapshot.asm); fixed frames include log.inc and use LOGBUF_BYTES.
 ; =============================================================================
-kv_logbuf_size:
+ga_logbuf_size:
     mov     eax, LOGBUF_BYTES
     ret
 
 ; =============================================================================
-; kv_logb_init — start a line: "ts=<sec>.<ms> level=<level>".
+; ga_logb_init — start a line: "ts=<sec>.<ms> level=<level>".
 ; @param  rdi  LogBuf*
 ; @param  rsi  const char *level (NUL-terminated, e.g. "INFO")
 ; @returns nothing.
 ; =============================================================================
-kv_logb_init:
+ga_logb_init:
     push    rbx
     push    r12
     sub     rsp, 24                     ; struct timespec + alignment
@@ -71,10 +71,10 @@ kv_logb_init:
     mov     rdi, rbx
     lea     rsi, [str_ts]
     mov     edx, 3
-    call    kv_logb_str
+    call    ga_logb_str
     mov     rdi, rbx
     mov     rsi, [rsp]                  ; tv_sec
-    call    kv_logb_u64
+    call    ga_logb_u64
     ; ".mmm" — always three digits
     mov     rax, [rsp + 8]              ; tv_nsec
     xor     edx, edx
@@ -102,21 +102,21 @@ kv_logb_init:
     mov     rdi, rbx
     lea     rsi, [str_level]
     mov     edx, 7
-    call    kv_logb_str
+    call    ga_logb_str
     mov     rdi, rbx
     mov     rsi, r12
-    call    kv_logb_cstr
+    call    ga_logb_cstr
     add     rsp, 24
     pop     r12
     pop     rbx
     ret
 
 ; =============================================================================
-; kv_logb_str — append bytes (truncating at the line capacity).
+; ga_logb_str — append bytes (truncating at the line capacity).
 ; @param  rdi  LogBuf*   @param rsi  bytes   @param rdx  length
 ; @returns nothing. Clobbers rax, rcx, rdx, rsi, r8.
 ; =============================================================================
-kv_logb_str:
+ga_logb_str:
     mov     rax, [rdi + LogBuf.len]
     mov     rcx, LOG_CAP
     sub     rcx, rax                    ; room left
@@ -137,11 +137,11 @@ kv_logb_str:
     ret
 
 ; =============================================================================
-; kv_logb_cstr — append a NUL-terminated string.
+; ga_logb_cstr — append a NUL-terminated string.
 ; @param  rdi  LogBuf*   @param rsi  const char * (NULL appends "(null)")
 ; @returns nothing.
 ; =============================================================================
-kv_logb_cstr:
+ga_logb_cstr:
     test    rsi, rsi
     jnz     .have
     lea     rsi, [str_null]
@@ -149,37 +149,37 @@ kv_logb_cstr:
     xor     edx, edx
 .len:
     cmp     byte [rsi + rdx], 0
-    je      kv_logb_str                 ; tail call with rdx = strlen
+    je      ga_logb_str                 ; tail call with rdx = strlen
     inc     rdx
     cmp     rdx, LOG_CAP
     jb      .len
-    jmp     kv_logb_str
+    jmp     ga_logb_str
 
 ; =============================================================================
-; kv_logb_u64 — append an unsigned decimal number.
+; ga_logb_u64 — append an unsigned decimal number.
 ; @param  rdi  LogBuf*   @param rsi  value
 ; @returns nothing.
 ; =============================================================================
-kv_logb_u64:
+ga_logb_u64:
     push    rbx
     sub     rsp, 32                     ; digit scratch
     mov     rbx, rdi
     mov     rdi, rsp
-    call    kv_fmt_u64
+    call    ga_fmt_u64
     mov     rdx, rax
     mov     rdi, rbx
     mov     rsi, rsp
-    call    kv_logb_str
+    call    ga_logb_str
     add     rsp, 32
     pop     rbx
     ret
 
 ; =============================================================================
-; kv_logb_emit — terminate the line with '\n' and write it to stderr.
+; ga_logb_emit — terminate the line with '\n' and write it to stderr.
 ; @param  rdi  LogBuf*
 ; @returns nothing (a failed write to stderr cannot be reported anywhere).
 ; =============================================================================
-kv_logb_emit:
+ga_logb_emit:
     mov     rax, [rdi + LogBuf.len]
     mov     byte [rdi + LogBuf.data + rax], 10
     lea     rdx, [rax + 1]
@@ -190,14 +190,14 @@ kv_logb_emit:
     ret
 
 ; =============================================================================
-; kv_fmt_u64 — decimal digits of an unsigned 64-bit value.
+; ga_fmt_u64 — decimal digits of an unsigned 64-bit value.
 ; @param  rdi  char *dst (at least 20 bytes)
 ; @param  rsi  value
 ; @returns rax = number of digits written (1..20); no terminator.
 ; @remarks Divides by the constant 10 via DIV (clear, and logging is not a hot
 ;          path). Clobbers rcx, rdx, r8-r10.
 ; =============================================================================
-kv_fmt_u64:
+ga_fmt_u64:
     mov     rax, rsi
     mov     r8, rdi
     mov     r9d, 10

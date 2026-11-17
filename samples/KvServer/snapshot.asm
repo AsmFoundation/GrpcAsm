@@ -50,12 +50,12 @@ bits 64
 extern kv_siphash128
 extern kv_store_hash
 extern kv_store_put
-extern kv_logb_init
-extern kv_logb_str
-extern kv_logb_u64
-extern kv_logb_cstr
-extern kv_logb_emit
-extern kv_logbuf_size
+extern ga_logb_init
+extern ga_logb_str
+extern ga_logb_u64
+extern ga_logb_cstr
+extern ga_logb_emit
+extern ga_logbuf_size
 
 section .rodata
 align 8
@@ -314,29 +314,29 @@ log_rejection:
     mov     r12, rdi
     mov     r13, rsi
     mov     r14, rdx
-    call    kv_logbuf_size
+    call    ga_logbuf_size
     sub     rsp, rax
     mov     r15, rax
     mov     rbx, rsp
     mov     rdi, rbx
     lea     rsi, [lvl_error]
-    call    kv_logb_init
+    call    ga_logb_init
     mov     rdi, rbx
     lea     rsi, [m_prefix]
     mov     edx, m_prefix_len
-    call    kv_logb_str
+    call    ga_logb_str
     mov     rdi, rbx
     mov     rsi, r12
-    call    kv_logb_cstr
+    call    ga_logb_cstr
     test    r13, r13
     js      .no_record
     mov     rdi, rbx                    ; '" record=N'
     lea     rsi, [m_record]
     mov     edx, m_record_len
-    call    kv_logb_str
+    call    ga_logb_str
     mov     rdi, rbx
     mov     rsi, r13
-    call    kv_logb_u64
+    call    ga_logb_u64
     jmp     .emit
 .no_record:
     test    r14, r14
@@ -344,20 +344,20 @@ log_rejection:
     mov     rdi, rbx                    ; '" errno=E'
     lea     rsi, [m_errno]
     mov     edx, m_errno_len
-    call    kv_logb_str
+    call    ga_logb_str
     mov     rsi, r14
     neg     rsi
     mov     rdi, rbx
-    call    kv_logb_u64
+    call    ga_logb_u64
     jmp     .emit
 .close_quote:
     mov     rdi, rbx
     lea     rsi, [m_quote]
     mov     edx, 1
-    call    kv_logb_str
+    call    ga_logb_str
 .emit:
     mov     rdi, rbx
-    call    kv_logb_emit
+    call    ga_logb_emit
     add     rsp, r15
     pop     r15
     pop     r14

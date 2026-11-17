@@ -29,14 +29,14 @@
 default rel
 bits 64
 
-%include "kvasm.inc"
+%include "grpcasm_sys.inc"
 %include "server.inc"
 %include "hpack.inc"
 
-extern kv_pool_malloc
-extern kv_pool_free
+extern ga_pool_malloc
+extern ga_pool_free
 extern memcpy
-extern kv_keyeq
+extern ga_keyeq
 
 section .rodata
 %include "huffman.inc"
@@ -129,8 +129,8 @@ hp_static:
 ; Layout facts for test_hpack.c's C mirror of HpackDec (a drift fails the
 ; test instead of corrupting a decoder): size, offset of .size, sentinel.
 align 8
-global kv_hpack_abi
-kv_hpack_abi:   dq HpackDec_size, HpackDec.size, 0xABCDEF0123456789
+global ga_hpack_abi
+ga_hpack_abi:   dq HpackDec_size, HpackDec.size, 0xABCDEF0123456789
 
 ; ---- names and values that classification recognizes ---------------------------
 %macro CSTR 2+
@@ -179,25 +179,25 @@ hp_token:
 %endrep
 
 section .bss align=64
-; Meanings of the static entries, computed by kv_hpack_global_init at startup
+; Meanings of the static entries, computed by ga_hpack_global_init at startup
 ; (before any worker runs), read-only afterwards.
 hp_static_meaning:  resd HPACK_STATIC_COUNT + 1
 
 section .text
 
-global kv_hpack_global_init
-global kv_hpack_init
-global kv_hpack_free
-global kv_hpack_decode
-global kv_huff_decode
-global kv_hpack_classify
+global ga_hpack_global_init
+global ga_hpack_init
+global ga_hpack_free
+global ga_hpack_decode
+global ga_huff_decode
+global ga_hpack_classify
 
 ; =============================================================================
-; kv_hpack_global_init — classify the 61 static entries.
+; ga_hpack_global_init — classify the 61 static entries.
 ; @returns nothing.
 ; @remarks Call once before any decoder runs (main, tests). Idempotent.
 ; =============================================================================
-kv_hpack_global_init:
+ga_hpack_global_init:
     push    rbx
     push    r12
     push    r13                         ; 3 pushes: aligned for calls
@@ -229,7 +229,7 @@ kv_hpack_global_init:
     ret
 
 ; =============================================================================
-; kv_hpack_init — prepare a connection's decoder.
+; ga_hpack_init — prepare a connection's decoder.
 ;
 ; @param  rdi  HpackDec*   @param rsi  Pool* (entry storage)
 ; @param  rdx  limit: our advertised SETTINGS_HEADER_TABLE_SIZE (>= 32)
@@ -238,7 +238,7 @@ kv_hpack_global_init:
 ;          every entry accounts at least 32 bytes, so the table can never
 ;          hold more entries than that.
 ; =============================================================================
-kv_hpack_init:
+ga_hpack_init:
     push    rbx
     push    r12
     push    r13                         ; 3 pushes: aligned for calls
@@ -258,7 +258,7 @@ kv_hpack_init:
     mov     [rbx + HpackDec.ring_mask], rax
     imul    rdi, rcx, HpEnt_size
     mov     rsi, r12
-    call    kv_pool_malloc wrt ..plt
+    call    ga_pool_malloc wrt ..plt
     test    rax, rax
     jz      .nomem
     mov     [rbx + HpackDec.ents], rax
@@ -280,11 +280,11 @@ kv_hpack_init:
     ret
 
 ; =============================================================================
-; kv_hpack_free — release every entry and the ring.
+; ga_hpack_free — release every entry and the ring.
 ; @param  rdi  HpackDec* (its ents may be 0 if init failed)
 ; @returns nothing.
 ; =============================================================================
-kv_hpack_free:
+ga_hpack_free:
     push    rbx
     mov     rbx, rdi
     cmp     qword [rbx + HpackDec.ents], 0
@@ -293,14 +293,14 @@ kv_hpack_free:
     call    hp_evict_to                 ; target size 0: frees every entry
     mov     rdi, [rbx + HpackDec.ents]
     mov     rsi, [rbx + HpackDec.pool]
-    call    kv_pool_free wrt ..plt
+    call    ga_pool_free wrt ..plt
     mov     qword [rbx + HpackDec.ents], 0
 .out:
     pop     rbx
     ret
 
 ; =============================================================================
-; kv_hpack_decode — decode one complete header block.
+; ga_hpack_decode — decode one complete header block.
 ;
 ; @param  rdi  HpackDec*
 ; @param  rsi  block        @param rdx  block length
@@ -337,7 +337,7 @@ kv_hpack_free:
 %define F_VLEN      64
 %define F_MEAN      72                  ; name's code, then the full meaning
 %define F_FLAGS     80                  ; HF_OVERSIZE accumulated for this field
-kv_hpack_decode:
+ga_hpack_decode:
     push    rbx
     push    rbp
     push    r12
@@ -553,7 +553,7 @@ hp_int:
 
 ; =============================================================================
 ; hp_str — decode a string literal (RFC 7541 §5.2). Internal.
-; @param  rdi  the caller's decode frame (kv_hpack_decode's rsp)
+; @param  rdi  the caller's decode frame (ga_hpack_decode's rsp)
 ; @param  r12  cursor (advanced)   r13 end
 ; @returns CF=0: rax = pointer, rdx = length. Raw strings point into the
 ;          block; Huffman strings are decoded into the frame's scratch buffer
@@ -564,7 +564,7 @@ hp_int:
 ; =============================================================================
 hp_str:
     push    rbx
-    push    rbp                         ; 2 pushes + return: kv_huff_decode needs no alignment
+    push    rbp                         ; 2 pushes + return: ga_huff_decode needs no alignment
     mov     rbp, rdi                    ; frame
     cmp     r12, r13
     jae     .err
@@ -595,7 +595,7 @@ hp_str:
     sub     rcx, [rbp + F_USED]         ; room left
     push    rdx
     push    rcx
-    call    kv_huff_decode
+    call    ga_huff_decode
     pop     rcx
     pop     rdx
     test    rax, rax
@@ -621,7 +621,7 @@ hp_str:
     ret
 
 ; =============================================================================
-; kv_huff_decode — decode a Huffman-coded string (RFC 7541 §5.2, Appendix B).
+; ga_huff_decode — decode a Huffman-coded string (RFC 7541 §5.2, Appendix B).
 ;
 ; @param  rdi  src   @param rsi  src length
 ; @param  rdx  dst   @param rcx  dst capacity
@@ -650,7 +650,7 @@ hp_str:
 %%nosym:
     movzx   r8d, bx                     ; next state
 %endmacro
-kv_huff_decode:
+ga_huff_decode:
     push    rbx
     xor     eax, eax
     test    rsi, rsi
@@ -765,7 +765,7 @@ hp_insert:
     mov     edi, 1                      ; empty name and value: still one block
 .alloc:
     mov     rsi, [rbx + HpackDec.pool]
-    call    kv_pool_malloc wrt ..plt
+    call    ga_pool_malloc wrt ..plt
     test    rax, rax
     jz      .nomem
     push    rax
@@ -838,7 +838,7 @@ hp_evict_to:
     lea     r14, [rax + rcx + HPACK_ENTRY_OVERHEAD]
     mov     rdi, [r13 + HpEnt.ptr]
     mov     rsi, [rbx + HpackDec.pool]
-    call    kv_pool_free wrt ..plt
+    call    ga_pool_free wrt ..plt
     sub     [rbx + HpackDec.size], r14
     dec     qword [rbx + HpackDec.count]
     jmp     .next
@@ -849,11 +849,11 @@ hp_evict_to:
     ret
 
 ; =============================================================================
-; kv_hpack_classify — the meaning of a field (exported for tests).
+; ga_hpack_classify — the meaning of a field (exported for tests).
 ; @param  rdi  name  @param rsi  nlen  @param rdx  value  @param rcx  vlen
 ; @returns eax = meaning (hpack.inc).
 ; =============================================================================
-kv_hpack_classify:
+ga_hpack_classify:
     push    rbx
     push    r12
     push    r13                         ; 3 pushes: aligned for calls
@@ -873,14 +873,14 @@ kv_hpack_classify:
 
 ; -----------------------------------------------------------------------------
 ; NAMEIS label — ZF=1 iff (rsi, rdx) equals the CSTR `label`. Clobbers rax,
-; rcx, r8, rdi (kv_keyeq keeps rsi, rdx).
+; rcx, r8, rdi (ga_keyeq keeps rsi, rdx).
 ; -----------------------------------------------------------------------------
 %macro NAMEIS 1
     cmp     rdx, %1_len
     jne     %%no
     lea     rdi, [%1]
     push    rdx
-    call    kv_keyeq wrt ..plt
+    call    ga_keyeq wrt ..plt
     pop     rdx
     test    eax, eax
     jz      %%no

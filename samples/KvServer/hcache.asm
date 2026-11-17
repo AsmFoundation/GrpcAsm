@@ -49,7 +49,7 @@ extern aligned_alloc
 extern calloc
 extern free
 extern memset
-extern kv_keyeq
+extern ga_keyeq
 extern kv_cuckoo_get
 
 section .text
@@ -314,13 +314,13 @@ kv_hcache_get:
 ; @param  rdi  HEntry*
 ; @param  rbx  HCache*  r12/r13 key/len  r14 h1  r15 h2  rbp &generation
 ; @returns rax = the entry's record if it is valid for this key, else 0.
-;          rdi (the entry) is preserved — saved in r10 around kv_keyeq — so
+;          rdi (the entry) is preserved — saved in r10 around ga_keyeq — so
 ;          the caller can promote a validated entry.
 ; @remarks Order of checks: both hashes (cheap, and they pin the generation
 ;          slot), then the generation (the record is live only if it still
 ;          matches), then the exact key. A matching tag with a moved
 ;          generation is stale: its tag is cleared so it is not re-checked.
-;          Called with rsp misaligned by 8, which is fine: kv_keyeq is a leaf
+;          Called with rsp misaligned by 8, which is fine: ga_keyeq is a leaf
 ;          with no alignment needs. Clobbers rax, rcx, rdx, rsi, r8-r10.
 ; =============================================================================
 probe:
@@ -335,10 +335,10 @@ probe:
     mov     edx, [r9 + Rec.key_len]
     cmp     rdx, r13
     jne     .none
-    mov     r10, rdi                    ; kv_keyeq takes rdi/rsi as its operands
+    mov     r10, rdi                    ; ga_keyeq takes rdi/rsi as its operands
     lea     rdi, [r9 + Rec.data]
     mov     rsi, r12
-    call    kv_keyeq wrt ..plt          ; clobbers rax, rcx, r8 only
+    call    ga_keyeq wrt ..plt          ; clobbers rax, rcx, r8 only
     mov     rdi, r10
     test    eax, eax
     jz      .none

@@ -1,6 +1,6 @@
 ; =============================================================================
-; util.asm — small leaf primitives shared by the store and the bake-off
-; structures: exact key comparison and SWAR tag matching.
+; util.asm — small leaf primitives of the engine: exact byte-string
+; comparison (HTTP/2 and HPACK use it; the KV store of samples/KvServer too).
 ;
 ; Both are written to clobber as few registers as possible (rax, rcx, r8),
 ; which lets hot loops in cuckoo.asm keep their state in the remaining
@@ -12,11 +12,10 @@ bits 64
 
 section .text
 
-global kv_keyeq
-global kv_tag_match
+global ga_keyeq
 
 ; =============================================================================
-; kv_keyeq — are two byte strings of the same length equal?
+; ga_keyeq — are two byte strings of the same length equal?
 ;
 ; @param  rdi  const uint8_t *a
 ; @param  rsi  const uint8_t *b
@@ -30,7 +29,7 @@ global kv_tag_match
 ;          No SIMD. Clobbers only rax, rcx, r8 (rdi/rsi/rdx preserved) —
 ;          cuckoo.asm relies on this.
 ; =============================================================================
-kv_keyeq:
+ga_keyeq:
     cmp     rdx, 8
     jb      .small
     lea     rcx, [rdx - 8]              ; offset of the final (overlapping) word
@@ -76,36 +75,6 @@ kv_keyeq:
     ret
 .ne:
     xor     eax, eax
-    ret
-
-; =============================================================================
-; kv_tag_match — which of 8 packed one-byte tags equal `tag`?
-;
-; @param  rdi  uint64_t tags (byte i = tag of slot i)
-; @param  rsi  tag to find (low 8 bits used; 0 finds empty slots)
-; @returns rax = 0x80 in every byte whose tag equals `tag`, 0 elsewhere.
-; @remarks Exact per byte (no false positives), 64-bit GPR arithmetic only:
-;            x = tags ^ broadcast(tag)          ; equal bytes become 0x00
-;            y = (x & 0x7F..7F) + 0x7F..7F      ; bit7 set iff low 7 bits != 0
-;            r = ~(y | x | 0x7F..7F)            ; bit7 set iff byte == 0
-;          The add cannot carry across bytes (max 0x7F + 0x7F = 0xFE), unlike
-;          the popular (x - 0x01..) & ~x & 0x80.. form, which can also flag
-;          the byte above a real match. cuckoo.asm inlines the same sequence;
-;          this exported copy exists for the unit test.
-; =============================================================================
-kv_tag_match:
-    movzx   esi, sil
-    mov     rax, 0x0101010101010101
-    imul    rsi, rax
-    xor     rdi, rsi
-    mov     rax, 0x7F7F7F7F7F7F7F7F
-    mov     rcx, rdi
-    and     rcx, rax
-    add     rcx, rax
-    or      rcx, rdi
-    or      rcx, rax
-    not     rcx
-    mov     rax, rcx
     ret
 
 section .note.GNU-stack noalloc noexec nowrite progbits
