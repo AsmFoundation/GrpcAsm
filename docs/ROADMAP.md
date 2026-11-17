@@ -403,7 +403,7 @@ matrix, CI, and the engine's own configuration struct (below).
 
 ## Milestone C — the APIs
 
-**Status (2026-11-17): C1 is done. C2 is next.**
+**Status (2026-11-17): C1 and C2 are done. C3 is next.**
 
 **The steps (planned 2026-11-17, after milestone B):**
 
@@ -432,21 +432,47 @@ matrix, CI, and the engine's own configuration struct (below).
   Both exit 1 cleanly, with no crash and no hang. KvAsm's suite, the Greeter's
   suite and the interop tests all pass. A `ga_server_wait` was not needed:
   whoever calls stop decides when.
-- **C2, the C ABI.** `include/grpcasm.h` and `libgrpcasm.so`
-  (`src/GrpcAsm.Native`), an adapter around the engine:
-  - unary handlers registered at run time, `int (*)(void *ctx, ga_call *,
-    const uint8_t *req, size_t len)`;
-  - the route table built in the adapter's memory, in the same byte format as
-    `GA_ROUTE`;
-  - `ga_call_reply` and `ga_call_fail`;
-  - `ga_version`;
-  - options passed by size (`ga_server_options.size`), so later fields never
-    break old callers.
-
-  The `.so` exports only that API (a version script) and binds the engine's
-  internal calls inside itself (`-Bsymbolic`). A C Greeter
-  (`samples/GreeterC`) gets the Greeter's tests. **To measure:** a C handler
-  behind a function pointer against the assembly Greeter.
+- **C2, the C ABI (done).** `src/GrpcAsm.Native` builds `libgrpcasm.so`
+  (140 KB): the engine plus an adapter, `capi.asm`, that is an application of
+  it. The public header is `include/grpcasm.h`, with the prefix `grpcasm_*`,
+  so it stays apart from the engine's internal `ga_*`.
+  - **The server:** `grpcasm_server_new(options, &server)`,
+    `_add_unary(path, handler, context)`, `_start`, `_stop(totals)` (from any
+    thread), `_run` (start + SIGTERM/SIGINT + stop, for standalone programs),
+    `_free` (stops first if it runs).
+  - **Calls:** `grpcasm_call_reply` and `grpcasm_call_fail(status, message)`;
+    the message is percent-encoded as gRPC requires and capped at 1,024 bytes.
+  - **Helpers:** `grpcasm_pb_bytes` (the engine's field decoder) and
+    `grpcasm_version`.
+  - **Errors** are negative errno values. Options travel with their `size`:
+    only the fields the caller's struct has are read, zero means the default,
+    and every value is range-checked before a server exists.
+  - **One started server per process,** guarded by a `lock cmpxchg`. A second
+    start is `-EBUSY`.
+  - **Port probe:** `grpcasm_server_start` probes the port, so it cannot
+    silently join another process's `SO_REUSEPORT` group (`-EADDRINUSE`,
+    logged).
+  - **The call handle** lives in the adapter's frame, so answering never
+    touches a stream the engine may already have freed. A second answer is
+    `-EALREADY`. A handler that returns without answering gets INTERNAL; one
+    that returns −1 ends its connection.
+  - **Health service names** come from the registered paths (`/pkg.Svc/M`
+    serves `pkg.Svc`).
+  - **Linking:** with `-Bsymbolic` and a version script (`grpcasm.map`). The
+    `.so` exports exactly the ten functions, `@@GRPCASM_0.1`; it has
+    `NEEDED libc.so.6`, `SYMBOLIC BIND_NOW` and no text relocations
+    (checked with `llvm-readobj`).
+  - **Verified:**
+    - `tests/greeter_c.sh` compiles `samples/GreeterC/greeter.c` with
+      `-Wall -Wextra -Werror` and runs the assembly Greeter's suite on it.
+      Every phase passes: exact answers, h2spec 146/146, refusals.
+    - `tests/capi.sh` passes. `capi_unit` covers every documented error code,
+      the slot, a stop from another thread, and `grpcasm_pb_bytes`.
+      `capi_server` covers each call function through nghttp, a 3 MiB reply
+      and a dropped connection.
+  - **Measured** (`benchmarks/endtoend/2026-11-17-c-abi`, h2load, one worker):
+    the assembly Greeter served a median of 755,153 calls/s and the C Greeter
+    753,994, a difference of 0.15%.
 - **C3, the NASM API** (`grpcasm.inc`): the route macros below generate both
   the table and the dispatch, so a route costs a direct jump instead of an
   application's own comparisons. The reply macros write in place. KvServer

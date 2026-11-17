@@ -15,7 +15,11 @@
 #      exactly as it does on Windows and macOS.
 #   4. tests/greeter.sh: the Greeter, the engine with no KvAsm code. Every
 #      answer is exact through nghttp, h2spec passes 146/146, and the
-#      startup refusals and a clean SIGTERM are checked.
+#      startup refusals and a clean SIGTERM are checked. Then the C ABI:
+#      tests/greeter_c.sh compiles samples/GreeterC against grpcasm.h and
+#      libgrpcasm.so with -Werror and runs the same suite on it, and
+#      tests/capi.sh checks every error code, the lifecycle and every call
+#      function of the ABI.
 #   5. tests/Greeter.Interop: grpc-dotnet against the Greeter in
 #      debian:bookworm-slim, with Docker REQUIRED, so a missing Docker fails
 #      the job instead of silently skipping the tests.
@@ -92,6 +96,12 @@ jobs:
 
       - name: Greeter — exact answers, h2spec, refusals
         run: bash tests/greeter.sh
+
+      - name: The C Greeter on libgrpcasm.so — the same suite
+        run: bash tests/greeter_c.sh
+
+      - name: The C ABI's contract
+        run: bash tests/capi.sh
 
       # global.json selects the Microsoft.Testing.Platform runner, which
       # `dotnet test --project` needs.

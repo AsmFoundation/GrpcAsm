@@ -1,0 +1,21 @@
+/*
+ * grpcasm.map — the version script of libgrpcasm.so: exactly grpcasm.h's functions are
+ * exported, under the version GRPCASM_0.1. Everything else (the engine's ga_* functions,
+ * the adapter's ga_app_* hooks, the route table) is local to the library, so it can change
+ * without breaking any program, and no symbol of a host can interpose on it.
+ */
+GRPCASM_0.1 {
+  global:
+    grpcasm_version;
+    grpcasm_server_new;
+    grpcasm_server_add_unary;
+    grpcasm_server_start;
+    grpcasm_server_stop;
+    grpcasm_server_run;
+    grpcasm_server_free;
+    grpcasm_call_reply;
+    grpcasm_call_fail;
+    grpcasm_pb_bytes;
+  local:
+    *;
+};

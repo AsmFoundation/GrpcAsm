@@ -1,0 +1,21 @@
+<Project Sdk="AsmFoundation.Sdk">
+  <!--
+    libgrpcasm.so: GrpcAsm's C ABI (include/grpcasm.h), the engine plus an adapter (capi.asm)
+    that is an application of it: the adapter defines the engine's hooks and route table, fills
+    them from handlers registered at run time, and exports grpcasm_* functions. C, .NET
+    (P/Invoke) and Python (ctypes) programs use the engine through it.
+
+    Linked with -Bsymbolic and a version script (grpcasm.map): only grpcasm.h's functions are
+    exported (GRPCASM_0.1), and every internal reference binds inside the library, so a host's
+    own symbols can never interpose on the engine's.
+  -->
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <AsmRuntime>Libc</AsmRuntime>
+    <AsmLibraryName>grpcasm</AsmLibraryName>
+    <AsmLinkFlags>-Bsymbolic --version-script="$(MSBuildProjectDirectory.Replace('\','/'))/grpcasm.map"</AsmLinkFlags>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../GrpcAsm/GrpcAsm.asmproj" />
+  </ItemGroup>
+</Project>

@@ -36,8 +36,15 @@ AsmSdk's bundled toolchain.
   application defines the hooks in `include/grpcasm_hooks.inc` and a route
   table (`include/grpcasm_routes.inc`), then hands its process to
   `ga_server_run`.
+- **`src/GrpcAsm.Native`:** `libgrpcasm.so`, the C ABI. It is
+  [`include/grpcasm.h`](src/GrpcAsm.Native/include/grpcasm.h): register unary
+  handlers at run time, then start and stop the server, or run it until a
+  signal. Answers go through `grpcasm_call_reply` and `grpcasm_call_fail`. The
+  .NET and Python APIs will build on it.
 - **`samples/Greeter`:** `helloworld.Greeter/SayHello` on the engine alone. It
   is the smallest complete application, and the generic test service.
+- **`samples/GreeterC`:** the same service in C on `libgrpcasm.so`. From
+  outside, it is indistinguishable from the assembly Greeter.
 - **`samples/KvServer`:** KvAsm's key-value service on the engine. It is the
   reference consumer, held to KvAsm's whole end-to-end suite.
 
@@ -55,6 +62,8 @@ Then, with Docker:
 | Command | What it checks |
 |---|---|
 | `tests/greeter.sh` | The Greeter: exact answers through `nghttp`, h2spec 146/146, startup refusals, a clean SIGTERM |
+| `tests/greeter_c.sh` | The C Greeter on `libgrpcasm.so`, compiled with `-Werror`, through the same suite |
+| `tests/capi.sh` | The C ABI's contract: every error code, the lifecycle, every call function through `nghttp` |
 | `dotnet test --project tests/Greeter.Interop -c Release` | grpc-dotnet against the Greeter: sizes up to 1 MiB, 1,000 concurrent calls, health, error statuses |
 | `tests/kvsuite.sh <KvAsm checkout>` | KvAsm's end-to-end suite against KvServer: protocol, streaming, shutdown, h2spec, the fuzzer |
 | `benchmarks/inprocess/bench_ga.sh` | The request path timed in process against KvAsm 0.3.0 (see its header) |
