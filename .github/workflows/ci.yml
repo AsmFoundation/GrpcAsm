@@ -1,0 +1,102 @@
+# =============================================================================
+# CI — every gate GrpcAsm has, on every push to main and every pull request.
+#
+# What runs, in one job (the suites all need the toolchain image the second
+# step builds, and a job boundary would mean exporting it for no gain):
+#   1. KvAsm checked out at KVASM_REF: its Dockerfile's toolchain stage
+#      (gcc, nghttp2's nghttp client, h2spec) is the image the shell suites
+#      run in, and its server/tests are the end-to-end suite kvsuite.sh runs.
+#   2. That toolchain image, built with BuildKit's GitHub Actions cache: the
+#      stage compiles nghttp2 from source, so unchanged layers are reused
+#      between runs.
+#   3. dotnet build GrpcAsm.slnx -c Release: the engine, both samples and the
+#      interop tests. AsmFoundation.Sdk's bundled toolchain (NASM, lld, from
+#      nuget.org) assembles and links the asm projects on this Linux runner,
+#      exactly as it does on Windows and macOS.
+#   4. tests/greeter.sh: the Greeter, the engine with no KvAsm code. Every
+#      answer is exact through nghttp, h2spec passes 146/146, and the
+#      startup refusals and a clean SIGTERM are checked.
+#   5. tests/Greeter.Interop: grpc-dotnet against the Greeter in
+#      debian:bookworm-slim, with Docker REQUIRED, so a missing Docker fails
+#      the job instead of silently skipping the tests.
+#   6. tests/kvsuite.sh: KvAsm's whole end-to-end suite against
+#      samples/KvServer (protocol, streaming, shutdown, idle timeouts,
+#      snapshots, refusals, h2spec, the fuzzer and its exact-answer matrix).
+#
+# Supply chain: every action is pinned to a full commit SHA (the tag in the
+# comment is for humans), the same pins as KvAsm's and AsmSdk's workflows.
+# The token is read-only, and neither checkout keeps credentials.
+# =============================================================================
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # One run per ref; a newer push to the same pull request cancels the older
+  # run, but pushes to main always finish.
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    name: Build, Greeter, interop and KvAsm suites
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      # The KvAsm release whose toolchain and end-to-end suite gate the engine.
+      KVASM_REF: v0.3.0
+      GRPCASM_REQUIRE_DOCKER: "1"
+      DOTNET_NOLOGO: "1"
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+    steps:
+      - name: Check out GrpcAsm
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check out KvAsm (toolchain image and end-to-end suite)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: AsmFoundation/KvAsm
+          ref: ${{ env.KVASM_REF }}
+          path: kvasm
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build KvAsm's toolchain image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: kvasm
+          target: toolchain
+          tags: kvasm-toolchain:latest
+          load: true
+          cache-from: type=gha,scope=kvasm-toolchain
+          cache-to: type=gha,scope=kvasm-toolchain,mode=max
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Build the solution
+        run: dotnet build GrpcAsm.slnx -c Release
+
+      - name: Greeter — exact answers, h2spec, refusals
+        run: bash tests/greeter.sh
+
+      # global.json selects the Microsoft.Testing.Platform runner, which
+      # `dotnet test --project` needs.
+      - name: grpc-dotnet interop against the Greeter
+        run: dotnet test --project tests/Greeter.Interop/Greeter.Interop.csproj -c Release --no-build
+
+      - name: KvAsm's end-to-end suite against KvServer
+        run: bash tests/kvsuite.sh "$GITHUB_WORKSPACE/kvasm"
