@@ -143,7 +143,7 @@ These ran in a throw-away prototype before this plan was written:
 
 ## Milestone B — GrpcAsm server
 
-**Status (2026-11-17): steps 1 to 3 of 5 done.**
+**Status (2026-11-17): steps 1 to 4 of 5 done.**
 
 **Step 1 — physical split, no instruction changed (done):**
 
@@ -226,19 +226,62 @@ These ran in a throw-away prototype before this plan was written:
     step=ga_app_worker_init errno=12` and startup ends cleanly (exit 1). With
     the caches off, the server starts and stops cleanly under the same cap.
 
+**Step 4 — the generic half of `grpc.asm` in the engine (done):**
+
+- **The engine's call layer:** `src/GrpcAsm/grpc.asm`, functions
+  `ga_grpc_*`. Every status, every message text and the order of the checks
+  are KvAsm's, which keeps KvAsm's suite a valid gate. Only the 405/415 body
+  texts no longer name KvAsm. The layer covers:
+  - body buffering within the per-stream and per-connection budgets;
+  - `ga_grpc_dispatch`: the 405/415 checks, UNIMPLEMENTED, RESOURCE_EXHAUSTED,
+    the 5-byte framing and the compression rules;
+  - the health service, built in;
+  - the early 405/415 of a client-streaming request (`ga_grpc_stream_data`);
+  - stream release and teardown;
+  - `ga_grpc_refuse` and `ga_grpc_write_prefix` for applications.
+- **`ga_grpc_dispatch` is frameless:** every path is a tail call, into the
+  application, the health check or a reply.
+- **The application's areas, sized at assembly time:**
+  - **`Stream.app`** (`GA_STREAM_APP_SIZE`, 72 bytes) replaces KvAsm's nine KV
+    fields in `Stream`. The `Stream` stays 224 bytes, so it still fits one
+    256-byte pool block. KvServer overlays its `KvCall` there, with an
+    assembly-time check that it fits.
+  - **`Conn.app`** (`GA_CONN_APP_SIZE`, 8 bytes) holds KvServer's upload
+    budget (`KvConn`).
+  - **The deferred-answer list** stays the engine's: `Conn.batch_head`,
+    `Stream.batch_next`, `ST_BATCHED`, `ST_CLOSED`.
+- **`ST_APP_STATE`:** the application sets this flag while `Stream.app` holds
+  something to release. The engine's `stream_free` then calls
+  `ga_app_call_release` first, however the stream ends. Every other stream is
+  still freed with one call. KvServer clears the flag when a Put's record is
+  published.
+- **The hooks are twelve again:**
+  - the five worker hooks;
+  - `ga_app_unary` (a validated message), `ga_app_stream_data`,
+    `ga_app_stream_end` and `ga_app_stream_fill`;
+  - `ga_app_batch_end`, `ga_app_call_release` and `ga_app_health_service`.
+
+  `ga_app_dispatch`, `_stream_append`, `_stream_release` and `_free_streams`
+  became the engine's own (`ga_grpc_*`).
+- **`include/grpcasm_reply.inc`** has the static reply-table macros (`CSTR`,
+  `NV`, `TRAILERS_ONLY`) and the `GRPC_*` codes, for the engine and its
+  applications.
+- **KvServer's `grpc.asm`** went from 2,349 to 1,966 lines. What is left is
+  the KV service: decode, batch, Upload, Download. The engine's new
+  `grpc.asm` has 785 lines, most of them documentation.
+- **Measured** (`benchmarks/inprocess/2026-11-17-steps-3-4`): KvAsm's
+  in-process harness (`bench_h2`) drove KvAsm 0.3.0, step 3 and step 4, with
+  12 interleaved rounds.
+  - **GET:** 70.22, 70.08 and 70.11 ns per request, the same within noise.
+  - **Health check:** 44.38, 44.44 and **41.71 ns**, so step 4 is 6.0% faster.
+  - All three variants print the same output digests, so their replies are
+    byte-identical.
+- **Verified:** `tests/kvsuite.sh` passes every phase: h2spec 146/146, the
+  matrix exact, 3,000 fuzzed connections, and the streaming limits and
+  fairness phases.
+
 **The next steps:**
 
-- **Step 4:** the generic half of `grpc.asm` moves into the engine: body
-  buffering and budgets, validation (405 / 415 / UNIMPLEMENTED / framing /
-  compression), error replies, the health service and stream release. A
-  per-call state area sized at assembly time replaces KvAsm's KV fields in
-  `Stream`.
-  - `ga_app_stream_append`, `ga_app_stream_release` and `ga_app_free_streams`
-    then become the engine's own.
-  - The hooks that remain are the worker's and the per-route ones (dispatch,
-    data, fill, batch end).
-  - With the NASM API (milestone C), a hook that an application does not
-    need is assembled away instead of called.
 - **Step 5:** route tables instead of `hpack.asm`'s hard-coded
   `/kvasm.v1.KvAsm/` prefix, plus a generic Echo/Greeter test service with its
   own tests (h2spec, a fuzz matrix, interop with grpc-dotnet).

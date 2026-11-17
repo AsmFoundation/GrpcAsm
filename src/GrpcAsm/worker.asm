@@ -108,6 +108,7 @@ extern ga_logb_u64
 extern ga_logb_emit
 extern ga_logbuf_size
 extern ga_pool_destroy
+extern ga_grpc_free_streams             ; the call layer (grpc.asm)
 extern ga_h2n_open
 extern ga_h2n_close
 extern ga_h2n_read
@@ -1231,7 +1232,7 @@ conn_linger:
     mov     rdi, rbp
     call    ga_h2n_close wrt ..plt      ; idempotent: conn_destroy calls it again
     mov     rdi, rbp
-    call    ga_app_free_streams wrt ..plt
+    call    ga_grpc_free_streams wrt ..plt
     mov     rdi, [rbp + Conn.fd]
     mov     esi, SHUT_WR
     mov     eax, SYS_shutdown
@@ -1268,7 +1269,7 @@ conn_destroy:
     mov     rdi, rbp
     call    ga_h2n_close wrt ..plt      ; idempotent (a lingering one was closed)
     mov     rdi, rbp
-    call    ga_app_free_streams wrt ..plt
+    call    ga_grpc_free_streams wrt ..plt
     mov     rdi, [rbp + Conn.fd]
     mov     eax, SYS_close
     syscall

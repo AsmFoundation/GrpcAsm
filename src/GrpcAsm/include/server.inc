@@ -196,6 +196,11 @@ endstruc
 ; pinned record (up to KVASM_MAX_UPLOAD_BYTES of memory), an Upload's
 ; reservation, a unary response's buffer.
 %define CONN_IDLE_CLOSING   8
+; The application's per-connection area (Conn.app), sized at assembly time.
+; 8 bytes: KvServer's need (the value bytes its uploads in progress reserve).
+; It is part of the engine's Conn layout, so the engine and the application
+; must be assembled with the same value; today both take it from this file.
+%define GA_CONN_APP_SIZE    8
 struc Conn
     .fd:                resq 1
     .flags:             resq 1
@@ -211,20 +216,25 @@ struc Conn
                                         ; progress even when the peer says nothing)
     .prev:              resq 1
     .next:              resq 1
-    ; GETs parsed from the current read, answered after it (prefetch batch).
+    ; Deferred answers: the streams the application queued while the
+    ; current read was parsed (ST_BATCHED, linked through Stream.batch_next
+    ; in arrival order), answered by its ga_app_batch_end right after the
+    ; read. ga_grpc_free_streams clears the list at teardown.
     .batch_head:        resq 1
     .batch_tail:        resq 1
     .h2:                resb H2_size    ; HTTP/2 engine state (h2n.asm)
-    ; Value bytes reserved by this connection's Uploads in progress (their
-    ; declared sizes), bounded by Config.conn_budget: a client cannot pin more
-    ; memory than one connection's budget by declaring uploads it never sends.
-    .up_bytes:          resq 1
+    ; The application's per-connection state: zeroed when the connection
+    ; opens (calloc), never read by the engine. KvServer keeps its upload
+    ; budget here (KvConn, grpc.asm).
+    .app:               resb GA_CONN_APP_SIZE
 endstruc
 
 ; ---- HdrField: one response header field, for the error-path replies ----------
-; grpc.asm's static header tables (Trailers-Only gRPC errors, 405/415) are
-; arrays of these, handed to ga_h2n_reply_headers / ga_h2n_reply_static;
-; h2n.asm's encode_nv HPACK-encodes them. Strings are not NUL-terminated.
+; The static header tables of the engine's and KvServer's grpc.asm
+; (Trailers-Only gRPC errors, 405/415) are arrays of these, built with the
+; macros of grpcasm_reply.inc and handed to ga_grpc_refuse,
+; ga_h2n_reply_headers or ga_h2n_reply_static; h2n.asm's encode_nv
+; HPACK-encodes them. Strings are not NUL-terminated.
 struc HdrField
     .name:              resq 1          ; const char*
     .value:             resq 1          ; const char*
@@ -241,10 +251,12 @@ endstruc
 ; resp_buf points at static read-only text (never freed), and the response
 ; ends on its last DATA frame: a plain HTTP error (405/415), no gRPC trailers.
 %define ST_STATIC_RESP      32
-; Queued in Conn.batch: executed and answered by ga_app_batch_end after the
-; current read (Get, Put and Delete; ADR 0005, ADR 0011).
+; Queued on Conn.batch_head: executed and answered by the application's
+; ga_app_batch_end after the current read (KvServer: Get, Put and Delete;
+; ADR 0005, ADR 0011). h2n does not release such a stream when it closes.
 %define ST_BATCHED          64
-; The peer reset a batched stream: run_batch frees it instead of answering.
+; The peer reset a batched stream: ga_app_batch_end releases it
+; (ga_grpc_stream_release) instead of answering it.
 %define ST_CLOSED           128
 ; req_buf points into the worker's read buffer instead of a pool block (the
 ; native engine's zero-copy path for a body that arrived whole in one DATA
@@ -256,6 +268,12 @@ endstruc
 ; being read from resp_buf (Download: the value is framed straight from its
 ; pinned record as windows open). resp_len is the body's exact total length.
 %define ST_GEN              512
+; Stream.app holds something the application must release (KvServer: an
+; unpublished record, a transfer's pin or buffers): stream_free calls
+; ga_app_call_release before freeing the stream. The application sets it
+; when it attaches such state, and may clear it once nothing is left (a
+; published Put), which puts the stream back on stream_free's one-call path.
+%define ST_APP_STATE        1024
 %define M_UNKNOWN           0
 %define M_GET               1
 %define M_PUT               2
@@ -263,6 +281,15 @@ endstruc
 %define M_HEALTH            4           ; grpc.health.v1.Health/Check
 %define M_UPLOAD            5           ; client streaming: DATA consumed as it arrives
 %define M_DOWNLOAD          6           ; server streaming: body generated (ST_GEN)
+; The application's per-call area (Stream.app), sized at assembly time. 72
+; bytes keep the Stream at 224: with the pool's 16-byte header one 256-byte
+; block, and a multiple of 16 for stream_open's inline zeroing (h2n.asm
+; asserts both). A larger area moves every Stream to the next pool class,
+; which stream_open picks at assembly time; state that only some calls need
+; belongs behind a pointer in the area (KvServer's Xfer). It is part of the
+; engine's Stream layout, so the engine and the application must be
+; assembled with the same value; today both take it from this file.
+%define GA_STREAM_APP_SIZE  72
 struc Stream
     .next:              resq 1
     .prev:              resq 1
@@ -276,26 +303,8 @@ struc Stream
     .resp_buf:          resq 1          ; complete gRPC response message (prefix + protobuf)
     .resp_len:          resq 1
     .resp_off:          resq 1
-    ; A batched call (ST_BATCHED: Get, Put or Delete) keeps what its deferred
-    ; store operation needs.
-    .key:               resq 1          ; points into req_buf (Get, Delete)
-    .key_len:           resq 1
-    .h1:                resq 1
-    .h2:                resq 1
-    ; The key's two candidate buckets (kv_store_locate at dispatch): the batch
-    ; prefetches their records and a Get looks the key up through them, so
-    ; the addresses are derived from (h1, h2) once instead of three times.
-    .b1:                resq 1
-    .b2:                resq 1
+    ; The next deferred stream on Conn.batch_head's list (ST_BATCHED).
     .batch_next:        resq 1
-    ; A batched Put's record, allocated and filled at dispatch, owned by the
-    ; Stream until ga_app_batch_end publishes it (then 0). stream_free
-    ; returns an unpublished one (kv_store_rec_free), so a stream reset or a
-    ; connection lost before its batch ran stores nothing and leaks nothing.
-    .wrec:              resq 1
-    ; A batched Put's or Delete's outcome, set under the writer mutex and
-    ; answered after it is released (kv_store_put_locked/_delete_locked).
-    .wres:              resq 1
     ; HTTP/2 stream state, owned by h2n.asm.
     .send_window:       resq 1          ; signed: what the peer lets us send here
     .recv_window:       resq 1          ; signed: what we still let the peer send
@@ -303,11 +312,10 @@ struc Stream
     .clen:              resq 1          ; declared content-length, or -1
     .data_len:          resq 1          ; DATA payload bytes received so far
     .pend_next:         resq 1          ; H2.pend list link
-    ; Streaming calls only (Upload/Download): their transfer state (grpc.asm
-    ; Xfer), or 0. A separate object so that unary calls — nearly every
-    ; stream — keep their small Stream (still one 256-byte pool block).
-    ; stream_free releases it: aborting an upload, unpinning a download.
-    .xfer:              resq 1
+    ; The application's per-call state: zeroed when the stream opens, never
+    ; read by the engine. KvServer overlays its KvCall here (grpc.asm). Set
+    ; ST_APP_STATE while it holds something to release.
+    .app:               resb GA_STREAM_APP_SIZE
 endstruc
 
 %endif

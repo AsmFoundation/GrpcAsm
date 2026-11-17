@@ -1,14 +1,15 @@
 <Project Sdk="AsmFoundation.Sdk">
   <!--
-    The GrpcAsm engine: HTTP/2 (h2n), HPACK (hpack), the epoll worker (worker), the per-worker
-    allocator (pool), structured logging (log) and helpers (util), moved out of KvAsm
-    (AsmFoundation/KvAsm server/src at 60d7e81) unchanged.
+    The GrpcAsm engine: HTTP/2 (h2n), HPACK (hpack), the gRPC call layer (grpc), the epoll
+    worker (worker), the per-worker allocator (pool), structured logging (log) and helpers
+    (util), moved out of KvAsm (AsmFoundation/KvAsm server/src at 60d7e81).
 
-    Milestone B: step 1 split the files, step 2 renamed the engine's exports to ga_*, and step 3
-    made the application hooks the only way the engine calls out: the ga_app_* symbols declared
-    and documented in include/grpcasm_hooks.inc, which an application (samples/KvServer) defines
-    and the linker binds when it links this library. The next steps move the generic half of
-    KvAsm's grpc.asm in here and replace the fixed routes with route tables (docs/ROADMAP.md).
+    Milestone B: step 1 split the files, step 2 renamed the engine's exports to ga_*, step 3
+    made the application hooks the only way the engine calls out (the ga_app_* symbols declared
+    and documented in include/grpcasm_hooks.inc, which an application such as samples/KvServer
+    defines and the linker binds), and step 4 moved the generic half of KvAsm's grpc.asm in
+    here (body buffering, validation, the health service, stream release). The next step
+    replaces the fixed routes with route tables (docs/ROADMAP.md).
   -->
   <PropertyGroup>
     <OutputType>StaticLibrary</OutputType>

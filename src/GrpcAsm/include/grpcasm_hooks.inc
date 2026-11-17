@@ -3,20 +3,21 @@
 ; makes into the application built on it.
 ;
 ; The engine holds no application logic. When a worker, a connection or a
-; stream reaches one of the points below, the engine calls a fixed symbol,
-; and the application linked with libgrpcasm.a defines it as a global
-; function (KvServer: samples/KvServer/grpc.asm and hooks.asm). This file is
-; that whole contract (docs/ROADMAP.md, milestone B step 3): the engine names
-; no application symbol other than these, and the application reaches the
-; engine only through the ga_* exports and the structures of server.inc.
+; call reaches one of the points below, the engine calls a fixed symbol, and
+; the application linked with libgrpcasm.a defines it as a global function
+; (KvServer: samples/KvServer/grpc.asm and hooks.asm). This file is that whole
+; contract (docs/ROADMAP.md, milestone B steps 3 and 4): the engine names no
+; application symbol other than these, and the application reaches the engine
+; only through the ga_* exports and the structures of server.inc.
 ;
 ; Why link-time symbols rather than a table of function pointers: the engine
 ; calls each hook with a direct `call rel32`, so there is no pointer to load,
 ; no indirect branch to predict and nothing to register at startup, and a
 ; missing hook fails the link instead of crashing at run time (every hook is
-; called from worker.asm or h2n.asm, which every server links). The price is
-; one application per executable; the ga_app_ prefix keeps the names out of
-; other code's way. How the C, .NET and Python APIs bind them is milestone C.
+; called from worker.asm, h2n.asm or grpc.asm, which every server links). The
+; price is one application per executable; the ga_app_ prefix keeps the names
+; out of other code's way. How the C, .NET and Python APIs bind them is
+; milestone C.
 ;
 ; Calling convention (System V AMD64, like every ga_* function):
 ;   - arguments in rdi, rsi, rdx, rcx; the result in eax or rax, as noted;
@@ -30,13 +31,17 @@
 ; lock. The exceptions are ga_app_worker_init and ga_app_worker_fini, which
 ; run on the thread that creates or frees the worker (main).
 ;
-; Ownership: the engine allocates a Stream from the worker's pool when a
-; request's HEADERS open it and links it on Conn.streams; the application
-; frees it (ga_app_stream_release, ga_app_free_streams), because the
-; per-connection accounting (Conn.streams, Conn.buffered, the batch) is still
-; the application's until step 4 moves the generic half into the engine.
-; Stream.method is the route hpack.asm resolved from :path (fixed routes
-; until step 5's route tables).
+; Ownership: the engine allocates a Stream when a request's HEADERS open it,
+; buffers its body, validates the call and frees the Stream when it ends
+; (engine grpc.asm). What the application keeps for a call lives in
+; Stream.app (GA_STREAM_APP_SIZE bytes, zeroed at open); while that holds
+; something to release, the application sets ST_APP_STATE and the engine
+; calls ga_app_call_release before freeing the stream, however the stream
+; ends. Its per-connection state lives in Conn.app. An answer may be deferred
+; to the end of the read: the application sets ST_BATCHED, links the stream on
+; Conn.batch_head (through Stream.batch_next, in arrival order) and answers it
+; in ga_app_batch_end. Stream.method is the route hpack.asm resolved from
+; :path (fixed routes until step 5's route tables).
 ; =============================================================================
 
 %ifndef GRPCASM_HOOKS_INC
@@ -69,7 +74,7 @@ extern ga_app_worker_fini
 ; @param   rdi  Worker*
 ; @returns nothing.
 ; @remarks Called when the worker's thread starts and after every return from
-;          epoll_wait, before any connection is touched: every stream hook and
+;          epoll_wait, before any connection is touched: every call hook and
 ;          every tick runs between a resume and the next pause. KvServer
 ;          rejoins its QSBR readers here (an XCHG, which is also the fence
 ;          that orders the worker's later reads of the store).
@@ -92,44 +97,27 @@ extern ga_app_worker_pause
 ;          writes happen.
 extern ga_app_worker_tick
 
-; ---- connection and stream hooks: rdi = Conn* (Stream* for the fill) ----------
+; ---- call hooks: rdi = Conn*, rsi = Stream* (Stream* first for the fill) ------
 
-; ga_app_dispatch — a request is complete: validate it, run it, answer it.
+; ga_app_unary — run a validated call whose request is one message.
 ; @param   rdi  Conn*
-; @param   rsi  Stream* (END_STREAM received; header fields resolved into
-;               Stream.method and Stream.flags; the body in req_buf/req_len)
+; @param   rsi  Stream* (already counted and marked ST_RESPONDED)
+; @param   rdx  the request message (protobuf, after the 5-byte prefix)
+; @param   rcx  its length
 ; @returns eax = 0, or -1 (out of memory while queuing the answer: the
 ;          engine ends the connection).
-; @remarks The stream may be answered and freed before this returns, so the
-;          engine never touches it afterwards. A body that arrived whole in
-;          one DATA frame is not copied: ST_BORROWED, req_buf points into the
-;          worker's read buffer and stays valid until ga_app_batch_end has
-;          returned, which lets the answer wait for the batch (KvServer
-;          batches Get, Put and Delete).
-extern ga_app_dispatch
-
-; ga_app_batch_end — every frame of one read has been processed.
-; @param   rdi  Conn*
-; @returns eax = 0, or -1 (out of memory: the engine ends the connection).
-; @remarks Called by ga_h2n_read after each read's frames, unless the
-;          connection is failing (H2F_CLOSING: its queued work is dropped with
-;          it), and before the read buffer is reused: the last point where
-;          ST_BORROWED bodies are valid. KvServer executes and answers its
-;          batched calls here; its write batching and prefetch pipeline rest
-;          on this hook (KvAsm ADR 0011).
-extern ga_app_batch_end
-
-; ga_app_stream_append — buffer a chunk of a request body.
-; @param   rdi  Conn*   @param rsi  Stream*
-; @param   rdx  data    @param rcx  length
-; @returns eax = 0 (buffered, or dropped because the application marked the
-;          stream oversize, ST_TOO_LARGE), or 1 (over the connection's
-;          buffering budget: the engine resets the stream with
-;          ENHANCE_YOUR_CALM).
-; @remarks For each DATA payload of a non-streaming route that the engine
-;          does not borrow (see ga_app_dispatch), after flow-control
-;          accounting. The data is valid only during the call.
-extern ga_app_stream_append
+; @remarks The engine calls this at END_STREAM, by tail call, once the
+;          method (POST), content-type, route, size limit, framing (exactly
+;          one message) and compression rules have passed; the health
+;          service never reaches it. Decoding the message is the
+;          application's: answer with ga_h2n_reply_*, refuse with
+;          ga_grpc_refuse, or defer the answer to ga_app_batch_end. The
+;          stream may be answered and freed before this returns, so the
+;          engine never touches it afterwards. The message is valid until
+;          ga_app_batch_end has returned: it may sit in the worker's read
+;          buffer (ST_BORROWED, a body that arrived in one DATA frame) rather
+;          than in Stream.req_buf.
+extern ga_app_unary
 
 ; ga_app_stream_data — consume a chunk of a client-streaming request.
 ; @param   rdi  Conn*   @param rsi  Stream* (a streaming route; KvServer:
@@ -139,10 +127,24 @@ extern ga_app_stream_append
 ;          error: the stream may already be closed and freed, so the engine
 ;          does not touch it), or -1 (out of memory: the connection ends).
 ; @remarks Called as each non-empty DATA payload arrives, after flow-control
-;          accounting; the engine never buffers these bodies, and the data is
-;          valid only during the call. END_STREAM still ends in
-;          ga_app_dispatch.
+;          accounting and after the engine checked that the request is POST
+;          with a gRPC content-type and has no answer yet (it refuses a
+;          non-gRPC upload with 405/415 itself, and drops what follows an
+;          answer). The engine never buffers these bodies, and the data is
+;          valid only during the call. An application that answers early
+;          sets ST_RESPONDED and counts the call (Worker.st_requests): the
+;          engine will not count it at END_STREAM.
 extern ga_app_stream_data
+
+; ga_app_stream_end — a client-streaming request ended (END_STREAM).
+; @param   rdi  Conn*   @param rsi  Stream* (already counted and marked
+;               ST_RESPONDED)
+; @returns eax = 0, or -1 (out of memory: the engine ends the connection).
+; @remarks Called by tail call once the method, content-type and route are
+;          checked; the body went to ga_app_stream_data as it arrived, so
+;          there is no framing to check. Not called for a call already
+;          answered early.
+extern ga_app_stream_end
 
 ; ga_app_stream_fill — produce the next bytes of a generated response body.
 ; @param   rdi  Stream* (ST_GEN; resp_len = the body's exact total length)
@@ -154,23 +156,37 @@ extern ga_app_stream_data
 ;          fail nor allocate: the frame header is already written.
 extern ga_app_stream_fill
 
-; ga_app_stream_release — unlink a stream from its connection and free it.
-; @param   rdi  Conn*   @param rsi  Stream*
-; @returns nothing.
-; @remarks Called for every stream the engine closes (a complete response, a
-;          reset, an open that failed), except one batched for
-;          ga_app_batch_end (ST_BATCHED): that one is marked ST_CLOSED and
-;          left to the batch. Also returns the stream's buffered bytes to the
-;          connection's budget.
-extern ga_app_stream_release
-
-; ga_app_free_streams — free every stream still attached to a connection.
+; ga_app_batch_end — every frame of one read has been processed.
 ; @param   rdi  Conn*
+; @returns eax = 0, or -1 (out of memory: the engine ends the connection).
+; @remarks Called by ga_h2n_read after each read's frames, unless the
+;          connection is failing (H2F_CLOSING: its deferred work is dropped
+;          with it), and before the read buffer is reused: the last point
+;          where ST_BORROWED messages are valid. The application answers the
+;          streams it deferred on Conn.batch_head, and releases the ones the
+;          peer reset meanwhile (ST_CLOSED) with ga_grpc_stream_release.
+;          KvServer's write batching and prefetch pipeline rest on this hook
+;          (KvAsm ADR 0011).
+extern ga_app_batch_end
+
+; ga_app_call_release — release the application's state of an ending call.
+; @param   rdi  Conn*   @param rsi  Stream* (ST_APP_STATE set)
 ; @returns nothing.
-; @remarks Called by the worker at connection teardown (linger and destroy),
-;          after ga_h2n_close released the engine's own per-connection state.
-;          Must be idempotent: a lingering connection is torn down again when
-;          it is destroyed.
-extern ga_app_free_streams
+; @remarks Called by the engine's stream_free, before it frees the stream's
+;          buffers and the stream itself, for every stream with ST_APP_STATE
+;          however it ends: answered, reset by either side, or torn down with
+;          its connection (drain, idle timeout, a broken peer). Must not
+;          answer the stream or touch the connection's output. KvServer frees
+;          an unpublished record here and drops a download's pin.
+extern ga_app_call_release
+
+; ga_app_health_service — whether the application serves a named service.
+; @param   rdi  the service name (not NUL-terminated)   @param rsi  its length (> 0)
+; @returns eax != 0 when served (the health check answers SERVING, or
+;          NOT_SERVING while the worker drains), 0 when unknown (NOT_FOUND).
+; @remarks Called by the built-in grpc.health.v1.Health/Check for a non-empty
+;          service name; the empty name means the whole server and needs no
+;          hook. A leaf in practice: compare and return.
+extern ga_app_health_service
 
 %endif
