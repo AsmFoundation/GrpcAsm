@@ -1,0 +1,13 @@
+# Build outputs
+bin/
+obj/
+artifacts/
+*.binlog
+
+# IDE
+.vs/
+.idea/
+*.user
+
+# Python
+__pycache__/
