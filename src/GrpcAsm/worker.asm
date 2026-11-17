@@ -144,6 +144,7 @@ global ga_worker_create
 global ga_worker_start
 global ga_worker_stop
 global ga_worker_join
+global ga_worker_destroy
 
 ; =============================================================================
 ; ga_port_probe — fail fast if another process already holds the TCP port.
@@ -446,9 +447,17 @@ ga_worker_join:
     ret
 
 ; =============================================================================
-; worker_free — close a worker's descriptors and free its memory. Internal.
+; worker_free (exported as ga_worker_destroy) — close a worker's descriptors
+; and free its memory.
 ; @param  rdi  Worker* (NULL is a no-op). Connections must already be closed.
+; @returns nothing.
+; @remarks Exported for a worker that ga_worker_create made but that never
+;          started (ga_server_start's cleanup after a startup that failed part
+;          of the way): it has no thread to join. A started worker must go
+;          through ga_worker_stop and ga_worker_join, which frees it here.
+;          Calls the application's ga_app_worker_fini.
 ; =============================================================================
+ga_worker_destroy:
 worker_free:
     test    rdi, rdi
     jz      .none

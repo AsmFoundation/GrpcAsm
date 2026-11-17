@@ -403,6 +403,67 @@ matrix, CI, and the engine's own configuration struct (below).
 
 ## Milestone C — the APIs
 
+**Status (2026-11-17): C1 is done. C2 is next.**
+
+**The steps (planned 2026-11-17, after milestone B):**
+
+- **C1, a lifecycle for embedding (done).** `ga_server_run` takes over
+  SIGTERM and SIGINT, which suits a standalone binary. Inside a .NET or Python
+  process, though, the runtime owns those signals. The engine now has:
+  - **`ga_server_start(Config*, app) → handle`** (or 0) creates and starts
+    every worker and logs `listening`. It never touches signals: the workers
+    inherit the caller's mask.
+  - **`ga_server_stop(handle, totals*)`** can be called from any thread,
+    exactly once. It stops every worker so they drain in parallel, joins them,
+    sums their counters and frees the handle.
+  - **`ga_server_run`** is now block SIGTERM/SIGINT + start + `sigwaitinfo` +
+    stop, with the same log lines as before.
+  - **`ga_worker_destroy`** (new) frees a worker that was created but never
+    started.
+
+  A failed start undoes itself completely: the started workers are stopped
+  and joined, the others are destroyed, and the memory is freed. It then logs
+  `worker startup failed step=alloc|create|start`. Both worker paths were
+  forced in a container with `ulimit -v`:
+  - **create:** worker 1's 512 MiB cache under a 1 GB cap gives
+    `step=ga_app_worker_init`, then `step=create`;
+  - **start:** 8 workers' thread stacks under a 70 MB cap give `step=start`.
+
+  Both exit 1 cleanly, with no crash and no hang. KvAsm's suite, the Greeter's
+  suite and the interop tests all pass. A `ga_server_wait` was not needed:
+  whoever calls stop decides when.
+- **C2, the C ABI.** `include/grpcasm.h` and `libgrpcasm.so`
+  (`src/GrpcAsm.Native`), an adapter around the engine:
+  - unary handlers registered at run time, `int (*)(void *ctx, ga_call *,
+    const uint8_t *req, size_t len)`;
+  - the route table built in the adapter's memory, in the same byte format as
+    `GA_ROUTE`;
+  - `ga_call_reply` and `ga_call_fail`;
+  - `ga_version`;
+  - options passed by size (`ga_server_options.size`), so later fields never
+    break old callers.
+
+  The `.so` exports only that API (a version script) and binds the engine's
+  internal calls inside itself (`-Bsymbolic`). A C Greeter
+  (`samples/GreeterC`) gets the Greeter's tests. **To measure:** a C handler
+  behind a function pointer against the assembly Greeter.
+- **C3, the NASM API** (`grpcasm.inc`): the route macros below generate both
+  the table and the dispatch, so a route costs a direct jump instead of an
+  application's own comparisons. The reply macros write in place. KvServer
+  and the Greeter are ported to it, gated by their suites and the in-process
+  benchmark.
+- **C4, .NET** (`GrpcAsm.Net`, over the C ABI): `[UnmanagedCallersOnly]`
+  handlers, typed handlers through Google.Protobuf, and raw handlers over
+  spans. Whether handlers run inline on the event loop or on the thread pool
+  is decided by measurement.
+- **C5, Python** (`grpcasm`, over the C ABI): ctypes, so there are no build
+  dependencies. A wheel bundles `libgrpcasm.so`.
+- **Later in C:** streaming calls through the C ABI (client streaming as it
+  arrives, server streaming as a pull generator), then the configuration
+  struct of the engine's own.
+
+**The API, as first planned:**
+
 - **NASM** (`grpcasm.inc`):
   - `GA_SERVICE` / `GA_UNARY` / `GA_SERVER_STREAM` / … macros build the route
     table at assembly time.
