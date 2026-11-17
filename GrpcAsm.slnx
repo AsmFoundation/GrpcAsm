@@ -1,0 +1,9 @@
+<Solution>
+  <!-- .asmproj projects use the generic MSBuild project type (AsmFoundation.Sdk docs). -->
+  <Folder Name="/src/">
+    <Project Path="src/GrpcAsm/GrpcAsm.asmproj" Type="13B669BE-BB05-4DDF-9536-439F39A36129" />
+  </Folder>
+  <Folder Name="/samples/">
+    <Project Path="samples/KvServer/KvServer.asmproj" Type="13B669BE-BB05-4DDF-9536-439F39A36129" />
+  </Folder>
+</Solution>

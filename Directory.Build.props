@@ -1,0 +1,20 @@
+<Project>
+  <!--
+    Shared settings for every project in GrpcAsm: the engine (.asmproj), the samples and the
+    test projects. The .asmproj projects build with AsmFoundation.Sdk, pinned in global.json.
+  -->
+  <PropertyGroup>
+    <Version>0.1.0</Version>
+    <Authors>Eli Belash</Authors>
+    <Company>AsmFoundation</Company>
+    <Copyright>Copyright 2026 Eli Belash</Copyright>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/AsmFoundation/GrpcAsm</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/AsmFoundation/GrpcAsm</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <!-- Every NASM warning is an error, as in KvAsm (the SDK still exempts the two
+         relocation warnings that position-independent ELF code always raises). -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <PackageOutputPath>$(MSBuildThisFileDirectory)artifacts/packages/</PackageOutputPath>
+  </PropertyGroup>
+</Project>

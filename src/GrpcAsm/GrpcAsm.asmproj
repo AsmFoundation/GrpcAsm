@@ -1,0 +1,17 @@
+<Project Sdk="AsmFoundation.Sdk">
+  <!--
+    The GrpcAsm engine: HTTP/2 (h2n), HPACK (hpack), the epoll worker (worker), the per-worker
+    allocator (pool), structured logging (log) and helpers (util), moved out of KvAsm
+    (AsmFoundation/KvAsm server/src at 60d7e81) unchanged.
+
+    Milestone B, step 1: a physical split only. The engine still calls the application through
+    KvAsm's hook names (kv_grpc_*, the store's QSBR and reclamation) and still shares KvAsm's
+    include files; those calls are resolved when an application (samples/KvServer) links this
+    library. The next steps rename the engine's symbols, replace the hooks with GrpcAsm's
+    handler interface and move the generic half of KvAsm's grpc.asm in here (docs/ROADMAP.md).
+  -->
+  <PropertyGroup>
+    <OutputType>StaticLibrary</OutputType>
+    <AsmLibraryName>grpcasm</AsmLibraryName>
+  </PropertyGroup>
+</Project>

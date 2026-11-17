@@ -143,6 +143,44 @@ These ran in a throw-away prototype before this plan was written:
 
 ## Milestone B — GrpcAsm server
 
+**Status (2026-11-17): step 1 of 5 done.**
+
+**Step 1 — physical split, no instruction changed (done):**
+
+- `src/GrpcAsm/GrpcAsm.asmproj` builds `libgrpcasm.a` (131 KB) from
+  KvAsm's `h2n`, `hpack`, `worker`, `pool`, `log` and `util`.
+- `samples/KvServer/KvServer.asmproj` is the rest of KvAsm (store, cuckoo
+  table, snapshot, `grpc.asm`, configuration, `main`). It links the engine
+  through a ProjectReference.
+- Both build from the published AsmFoundation.Sdk 0.1.0.
+- **Verified:** `tests/kvsuite.sh` runs KvAsm's whole end-to-end suite
+  against the split binary and every phase passes (h2spec 146/146, the
+  500-conversation matrix exact, 3,000 fuzzed connections). That is the gate
+  for every following step.
+
+**The next steps:**
+
+- **Step 2:** the engine's own names. `kv_*` becomes `ga_*`, and `kvasm.inc`
+  is split into `grpcasm.inc` (syscalls, errno, mmap) and the KV structures,
+  which move to the application.
+- **Step 3:** the hook interface. The engine stops naming `kv_grpc_*` and the
+  store, and calls application hooks instead:
+  - per route: request, data, end, fill, release;
+  - per worker: start, stop, pass begin and end, tick, batch end.
+
+  With the NASM API they resolve at assembly time to direct calls, or to
+  nothing.
+- **Step 4:** the generic half of `grpc.asm` moves into the engine: body
+  buffering and budgets, validation (405 / 415 / UNIMPLEMENTED / framing /
+  compression), error replies, the health service and stream release. A
+  per-call state area sized at assembly time replaces KvAsm's KV fields in
+  `Stream`.
+- **Step 5:** route tables instead of `hpack.asm`'s hard-coded
+  `/kvasm.v1.KvAsm/` prefix, plus a generic Echo/Greeter test service with its
+  own tests (h2spec, a fuzz matrix, interop with grpc-dotnet).
+
+**The plan for the server, as first written:**
+
 - **Move the engine out of KvAsm:** `h2n` (HTTP/2), `hpack`, the gRPC framing,
   the epoll worker (two-phase loop, `SO_REUSEPORT`, drain, idle timeouts), the
   pool, the header-block cache and logging. Their tests come along (h2spec, the
