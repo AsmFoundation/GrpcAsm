@@ -19,10 +19,14 @@
 #      tests/greeter_c.sh compiles samples/GreeterC against grpcasm.h and
 #      libgrpcasm.so with -Werror and runs the same suite on it, and
 #      tests/capi.sh checks every error code, the lifecycle and every call
-#      function of the ABI.
+#      function of the ABI. tests/client.sh runs the client (milestone D)
+#      against the Greeter, capi_server and a scripted HTTP/2 server, and the
+#      NASM client sample against the Greeter.
 #   5. tests/Greeter.Interop: grpc-dotnet against the Greeter in
-#      debian:bookworm-slim, with Docker REQUIRED, so a missing Docker fails
-#      the job instead of silently skipping the tests.
+#      debian:bookworm-slim, and the NASM client (samples/GreeterClient)
+#      against a grpc-dotnet server (Kestrel in the test process, reached
+#      through Testcontainers' host port forwarding), with Docker REQUIRED, so
+#      a missing Docker fails the job instead of silently skipping the tests.
 #   6. tests/kvsuite.sh: KvAsm's whole end-to-end suite against
 #      samples/KvServer (protocol, streaming, shutdown, idle timeouts,
 #      snapshots, refusals, h2spec, the fuzzer and its exact-answer matrix).
@@ -102,6 +106,9 @@ jobs:
 
       - name: The C ABI's contract
         run: bash tests/capi.sh
+
+      - name: The client — Greeter, capi_server, a scripted server, the NASM client
+        run: bash tests/client.sh
 
       # global.json selects the Microsoft.Testing.Platform runner, which
       # `dotnet test --project` needs.

@@ -8,6 +8,10 @@
     so the tests always exercise this tree's engine. Build the solution first
     (dotnet build GrpcAsm.slnx -c Release): GreeterServer locates
     samples/Greeter/bin/Release/greeter, or GREETER_BINARY when set.
+
+    The other direction too (ClientInteropTests): GrpcAsm's client, as the NASM sample
+    samples/GreeterClient, calls a Greeter that ASP.NET Core (Kestrel, Grpc.AspNetCore) serves in
+    the test process, through Testcontainers' host port forwarding.
   -->
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -21,7 +25,14 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- ASP.NET Core's shared framework: Kestrel and Grpc.AspNetCore serve the Greeter that
+         GrpcAsm's client calls in ClientInteropTests (this SDK is not the Web SDK). -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Google.Protobuf" />
+    <PackageReference Include="Grpc.AspNetCore" />
     <PackageReference Include="Grpc.HealthCheck" />
     <PackageReference Include="Grpc.Net.Client" />
     <PackageReference Include="Grpc.Tools" PrivateAssets="All" />
@@ -30,8 +41,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Client stubs only: the server under test is the assembly one. -->
-    <Protobuf Include="Protos\helloworld.proto" GrpcServices="Client" />
+    <!-- Both sides: the client stubs call the assembly Greeter (GreeterInteropTests), and the
+         server base class serves the Greeter that GrpcAsm's client calls (ClientInteropTests). -->
+    <Protobuf Include="Protos\helloworld.proto" GrpcServices="Both" />
   </ItemGroup>
 
 </Project>

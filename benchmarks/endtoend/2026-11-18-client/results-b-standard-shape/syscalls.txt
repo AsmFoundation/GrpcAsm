@@ -1,0 +1,4 @@
+grpc round 1: 31740019 requests, server reads 2005376, 15.8 requests per read
+grpcasm round 1: 31052630 requests, server reads 1960754, 15.8 requests per read
+grpc round 2: 33732276 requests, server reads 2134295, 15.8 requests per read
+grpcasm round 2: 28568194 requests, server reads 1803585, 15.8 requests per read

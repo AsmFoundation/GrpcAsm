@@ -16,7 +16,8 @@ between the network and their code.
   - It is generalized from one key-value service to any gRPC service:
     assembly-time route tables, unary and streaming calls, and hooks for
     consumers that batch work across an epoll batch.
-- **A client:** an HPACK encoder and pipelined calls.
+- **A client:** an HPACK encoder and pipelined calls (unary calls today;
+  streaming next).
 - **Four ways to use it:**
   - NASM (`grpcasm.inc`: register calling convention, handlers inlined at the
     dispatch site);
@@ -50,6 +51,19 @@ AsmSdk's bundled toolchain.
   outside, it is indistinguishable from the assembly Greeter.
 - **`samples/KvServer`:** KvAsm's key-value service on the engine. It is the
   reference consumer, held to KvAsm's whole end-to-end suite.
+- **The client** (`src/GrpcAsm/client.asm`, `include/grpcasm_client.inc`; in
+  C, `grpcasm_client_*` in `grpcasm.h`):
+  - one HTTP/2 connection with pipelined unary calls and a callback per call;
+  - socket mode, with a blocking unary call, or bytes in and bytes out;
+  - from a method's second call, its headers are 6 indexed bytes, and a
+    response that arrives in one read reaches its callback without a copy.
+  - Measured in kvbench against its nghttp2 client, on KvAsm 0.3.0, where
+    the client is the limit: 2.54× the calls per second, at 0.37× the client
+    CPU per call, with 17% less server CPU per call
+    ([evidence](benchmarks/endtoend/2026-11-18-client/README.md), including
+    the server-bound case and its loopback caveat).
+- **`samples/GreeterClient`:** SayHello from NASM through the client, with no
+  server code linked.
 
 ## Building and testing
 
@@ -67,7 +81,8 @@ Then, with Docker:
 | `tests/greeter.sh` | The Greeter: exact answers through `nghttp`, h2spec 146/146, startup refusals, a clean SIGTERM |
 | `tests/greeter_c.sh` | The C Greeter on `libgrpcasm.so`, compiled with `-Werror`, through the same suite |
 | `tests/capi.sh` | The C ABI's contract: every error code, the lifecycle, every call function through `nghttp` |
-| `dotnet test --project tests/Greeter.Interop -c Release` | grpc-dotnet against the Greeter: sizes up to 1 MiB, 1,000 concurrent calls, health, error statuses |
+| `tests/client.sh` | The client against the Greeter, `capi_server` and a scripted HTTP/2 server (GOAWAY, RST_STREAM, 1xx, CONTINUATION, deadlines, a response split at every byte, ...), then the NASM client |
+| `dotnet test --project tests/Greeter.Interop -c Release` | grpc-dotnet against the Greeter (sizes up to 1 MiB, 1,000 concurrent calls, health, error statuses), and the NASM client against a grpc-dotnet (Kestrel) server |
 | `tests/kvsuite.sh <KvAsm checkout>` | KvAsm's end-to-end suite against KvServer: protocol, streaming, shutdown, h2spec, the fuzzer |
 | `benchmarks/inprocess/bench_ga.sh` | The request path timed in process against KvAsm 0.3.0 (see its header) |
 

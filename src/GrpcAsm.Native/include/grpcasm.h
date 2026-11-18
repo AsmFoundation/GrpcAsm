@@ -1,6 +1,8 @@
 /*
- * grpcasm.h — the C ABI of GrpcAsm: a gRPC server whose HTTP/2, HPACK, gRPC and event-loop
- * engine is x86-64 assembly (libgrpcasm.so, Linux x86-64, glibc 2.34+).
+ * grpcasm.h — the C ABI of GrpcAsm: a gRPC server and client whose HTTP/2, HPACK, gRPC and
+ * event-loop engine is x86-64 assembly (libgrpcasm.so, Linux x86-64, glibc 2.34+).
+ *
+ * The server is described first; the client (grpcasm_client_*) follows at the end.
  *
  * A program creates a server from options, registers its unary methods (a full path such as
  * "/helloworld.Greeter/SayHello" and a handler), and either runs it until SIGTERM or SIGINT
@@ -196,6 +198,194 @@ int grpcasm_call_fail(grpcasm_call *call, int status, const char *message);
  */
 int grpcasm_pb_bytes(const uint8_t *message, size_t length, uint32_t field,
                      const uint8_t **value, size_t *value_length);
+
+/* ======================================================================================== */
+/* Client                                                                                   */
+/* ======================================================================================== */
+
+/*
+ * A client is one HTTP/2 connection to one gRPC server, carrying unary calls, pipelined. One
+ * thread drives a client at a time (no locks): for parallel connections, use one client per
+ * thread.
+ *
+ * Two ways to drive it:
+ *   - Socket mode: grpcasm_client_connect opens the connection and returns once the server's
+ *     HTTP/2 preface arrived. grpcasm_client_poll then waits, processes what the server sent
+ *     and sends what is queued; grpcasm_client_unary is a blocking call on top of it. For an
+ *     event loop of your own, grpcasm_client_fd gives the socket.
+ *   - Bytes in, bytes out: grpcasm_client_new creates a client without a socket. The caller
+ *     sends what grpcasm_client_output shows (then grpcasm_client_consume) and hands over what
+ *     it receives (grpcasm_client_input). A benchmark or an I/O framework that owns its
+ *     sockets drives the client this way; the protocol code is the same.
+ *
+ * Calls: register each method once (grpcasm_client_method returns a handle), then call it
+ * with the handle. The handle is what lets the client reuse a method's encoded HTTP/2 header
+ * block: after a method's first call, its headers cost a 16-byte copy.
+ *
+ * Completion: every call that grpcasm_client_call or grpcasm_client_unary accepted (return
+ * value 0) ends with exactly one call of its done function, on the thread driving the client,
+ * from inside grpcasm_client_input, _poll, _unary or _free. The callback may issue new calls;
+ * it must not call grpcasm_client_input, _poll or _unary (they return -EBUSY), and must never
+ * free the client.
+ *
+ * Statuses the client produces itself: UNAVAILABLE (14) when the connection ends or the
+ * server's GOAWAY says the call was not processed; INTERNAL (13) for a response that breaks
+ * HTTP/2 or gRPC; RESOURCE_EXHAUSTED (8) above max_response_bytes; DEADLINE_EXCEEDED (4) when
+ * grpcasm_client_unary's timeout passes; CANCELLED (1) for calls still running when the client
+ * is freed; and the gRPC mapping of a non-200 HTTP status.
+ */
+
+/** A client: created by grpcasm_client_new or _connect, freed by grpcasm_client_free. */
+typedef struct grpcasm_client grpcasm_client;
+
+/**
+ * Client options. Zero means "the default" for every field, so `{ .size = sizeof opts }` is a
+ * complete, valid configuration.
+ */
+typedef struct grpcasm_client_options {
+  /** sizeof(grpcasm_client_options) as the caller compiled it: fields beyond it are defaults. */
+  uint32_t size;
+  /**
+   * Largest response message accepted, in bytes, below 2 GiB. Default 4 MiB. A larger
+   * response is cancelled and its call completes RESOURCE_EXHAUSTED.
+   */
+  uint32_t max_response_bytes;
+  /**
+   * Calls in flight on the connection, 1..65536. Default 1000. More calls wait in a queue,
+   * in order; so do calls above the server's SETTINGS_MAX_CONCURRENT_STREAMS.
+   */
+  uint32_t max_concurrent_calls;
+  /** grpcasm_client_connect: milliseconds for the connection and the HTTP/2 handshake. Default 10000. */
+  uint32_t connect_timeout_ms;
+  /**
+   * The :authority of every call, 1..255 bytes, or NULL: "host:port" for
+   * grpcasm_client_connect ("[host]:port" for an IPv6 address), "localhost" for
+   * grpcasm_client_new. Copied.
+   */
+  const char *authority;
+} grpcasm_client_options;
+
+/**
+ * A call's completion.
+ *
+ * @param context          the pointer given with the call
+ * @param status           the gRPC status: 0 OK, else the server's or one the client produced
+ * @param message          the status message (percent-decoded), or NULL
+ * @param message_length   its length
+ * @param response         status 0: the response message (protobuf bytes, after the gRPC
+ *                         framing); else NULL
+ * @param response_length  its length
+ *
+ * Every pointer is valid only until the function returns.
+ */
+typedef void (*grpcasm_client_done_fn)(void *context, int status, const char *message,
+                                       size_t message_length, const uint8_t *response,
+                                       size_t response_length);
+
+/**
+ * Connects to a gRPC server over cleartext HTTP/2 (h2c, prior knowledge).
+ *
+ * Tries every address the host resolves to, then exchanges the HTTP/2 prefaces: it returns
+ * once the server's SETTINGS arrived. Sets TCP_NODELAY.
+ *
+ * @param host     a name or an IPv4/IPv6 address
+ * @param port     the server's port
+ * @param options  options, or NULL
+ * @param client   receives the client (NULL on failure)
+ * @return 0, -EINVAL, -EHOSTUNREACH (the name did not resolve), the last address's connect
+ *         error (-ECONNREFUSED, ...), -ETIMEDOUT, -EPROTO (the server is not HTTP/2) or
+ *         -ENOMEM.
+ */
+int grpcasm_client_connect(const char *host, uint16_t port, const grpcasm_client_options *options,
+                           grpcasm_client **client);
+
+/**
+ * Creates a client without a socket (bytes in, bytes out). Its output already holds the
+ * HTTP/2 connection preface; calls may be issued at once.
+ *
+ * @return 0, -EINVAL or -ENOMEM.
+ */
+int grpcasm_client_new(const grpcasm_client_options *options, grpcasm_client **client);
+
+/**
+ * Frees a client. Calls still running complete first, CANCELLED "client closed". In socket
+ * mode a GOAWAY is offered to the socket, which is then closed. NULL is ignored. Never call it
+ * from a callback.
+ */
+void grpcasm_client_free(grpcasm_client *client);
+
+/**
+ * Registers a method, or finds it registered.
+ *
+ * @param path  "/<package.Service>/<Method>", 1..2048 bytes; copied
+ * @return the method's handle (>= 0), -EINVAL or -ENOMEM.
+ */
+int grpcasm_client_method(grpcasm_client *client, const char *path);
+
+/**
+ * Issues a unary call. The request is copied; nothing is sent yet (grpcasm_client_flush or
+ * _poll sends, or the caller in bytes mode), so calls issued back to back leave in one send.
+ *
+ * @param method   a handle from grpcasm_client_method
+ * @param request  the request message (protobuf bytes, without gRPC framing); may be NULL when
+ *                 length is 0
+ * @param length   its length, below 4 GiB
+ * @param done     called once when the call completes (never NULL)
+ * @param context  passed to done
+ * @return 0 (done will run exactly once), or (done never runs) -EINVAL, -EMSGSIZE,
+ *         -ESHUTDOWN (the server sent GOAWAY, or the connection used up its stream ids: open a
+ *         new client), the connection's error once it failed, or -ENOMEM.
+ */
+int grpcasm_client_call(grpcasm_client *client, int method, const void *request, size_t length,
+                        grpcasm_client_done_fn done, void *context);
+
+/**
+ * Issues a call and waits for it (socket mode). Other calls make progress meanwhile.
+ *
+ * @param timeout_ms  milliseconds before the call is cancelled and completes
+ *                    DEADLINE_EXCEEDED; -1 waits without a limit
+ * @return 0 when the call completed (done ran; its status says how), or what
+ *         grpcasm_client_call returns, -EBUSY (from a callback) or -EBADF (bytes mode).
+ */
+int grpcasm_client_unary(grpcasm_client *client, int method, const void *request, size_t length,
+                         grpcasm_client_done_fn done, void *context, int timeout_ms);
+
+/**
+ * Sends what is queued, waits for the server up to timeout_ms (0: not at all, -1: no limit),
+ * processes what arrived, and sends again (socket mode).
+ *
+ * @return the number of calls completed (callbacks run), -EBUSY, -EBADF, or the connection's
+ *         error once it ended and nothing completed.
+ */
+int grpcasm_client_poll(grpcasm_client *client, int timeout_ms);
+
+/**
+ * Sends what is queued without waiting (socket mode).
+ *
+ * @return 0 (all sent), 1 (the socket is full: wait for POLLOUT), -EBADF, or the error that
+ *         ended the connection (its calls then completed UNAVAILABLE).
+ */
+int grpcasm_client_flush(grpcasm_client *client);
+
+/** The client's socket for an event loop (socket mode), or -1 (bytes mode). */
+int grpcasm_client_fd(const grpcasm_client *client);
+
+/**
+ * Processes bytes received from the server (bytes mode). They need not be whole frames, and
+ * are only read during the call. Afterwards, send the output.
+ *
+ * @return the number of calls completed, -EBUSY, or the connection's error once it failed.
+ */
+int grpcasm_client_input(grpcasm_client *client, const uint8_t *data, size_t length);
+
+/**
+ * The bytes waiting to be sent (bytes mode): stores where they are in *data (when data is not
+ * NULL) and returns how many. Valid until the next call into the client.
+ */
+size_t grpcasm_client_output(grpcasm_client *client, const uint8_t **data);
+
+/** Reports that length bytes of the output were sent (bytes mode). */
+void grpcasm_client_consume(grpcasm_client *client, size_t length);
 
 #ifdef __cplusplus
 }

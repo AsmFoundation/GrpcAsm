@@ -154,6 +154,9 @@ CSTR k_encoding,    "grpc-encoding"
 CSTR k_clength,     "content-length"
 CSTR k_proxyconn,   "proxy-connection"
 CSTR k_transfer,    "transfer-encoding"
+CSTR k_gstatus,     "grpc-status"       ; response fields: the client acts on them
+CSTR k_gmessage,    "grpc-message"
+CSTR v_200,         "200"               ; :status of every successful gRPC response
 CSTR v_post,        "POST"
 CSTR v_head,        "HEAD"
 CSTR v_grpc,        "application/grpc"
@@ -941,6 +944,15 @@ classify_name:
     NAMEIS  k_clength
     mov     r9d, HF_CONTENT_LENGTH
     je      .done
+    ; The client's two trailer fields. Classified here, once per distinct
+    ; field, so that a warm table hands the client an indexed grpc-status with
+    ; its meaning already known (no name compare per response).
+    NAMEIS  k_gstatus
+    mov     r9d, HF_GRPC_STATUS
+    je      .done
+    NAMEIS  k_gmessage
+    mov     r9d, HF_GRPC_MESSAGE
+    je      .done
     mov     r9d, HF_CONN_SPECIFIC
     NAMEIS  k_connection
     je      .done
@@ -1024,6 +1036,15 @@ classify_value:
     je      .te
     cmp     eax, HF_GRPC_ENCODING
     je      .encoding
+    cmp     eax, HF_STATUS
+    je      .status
+    jmp     .ret
+.status:
+    ; :status 200 gets VC_OK, so the client accepts a successful response
+    ; from the class alone. Other codes keep class 0: the client parses their
+    ; digits (they are rare, and each maps to its own gRPC status).
+    VALUEIS v_200
+    je      .ok
     jmp     .ret
 .method:
     VALUEIS v_post

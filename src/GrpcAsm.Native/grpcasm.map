@@ -1,6 +1,7 @@
 /*
  * grpcasm.map — the version script of libgrpcasm.so: exactly grpcasm.h's functions are
- * exported, under the version GRPCASM_0.1. Everything else (the engine's ga_* functions,
+ * exported, under the version GRPCASM_0.1 (the server's and the client's: 0.1 is not
+ * released yet, so the client joins the same version node). Everything else (the engine's ga_* functions,
  * the adapter's ga_app_* hooks, the route table) is local to the library, so it can change
  * without breaking any program, and no symbol of a host can interpose on it.
  */
@@ -16,6 +17,18 @@ GRPCASM_0.1 {
     grpcasm_call_reply;
     grpcasm_call_fail;
     grpcasm_pb_bytes;
+    grpcasm_client_new;
+    grpcasm_client_connect;
+    grpcasm_client_free;
+    grpcasm_client_method;
+    grpcasm_client_call;
+    grpcasm_client_unary;
+    grpcasm_client_poll;
+    grpcasm_client_flush;
+    grpcasm_client_fd;
+    grpcasm_client_input;
+    grpcasm_client_output;
+    grpcasm_client_consume;
   local:
     *;
 };

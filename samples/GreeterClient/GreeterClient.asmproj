@@ -1,0 +1,23 @@
+<Project Sdk="AsmFoundation.Sdk">
+  <!--
+    GreeterClient: GrpcAsm's client from NASM. It calls helloworld.Greeter/SayHello once and
+    prints the reply: `greeter_client [name]` prints "Hello <name>" (default "world").
+
+    It is the smallest complete program on the client API (include/grpcasm_client.inc):
+    connect, register the method, one blocking unary call, free. It defines no routes and no
+    server hooks. That it links at all is the point: the engine's default empty route table
+    (src/GrpcAsm/routes_default.asm) stands in for the table only a server writes.
+
+    Server address from the environment: GREETER_HOST (default 127.0.0.1) and GREETER_PORT
+    (default 50051). Exit status 0 on OK, 1 otherwise (the status is printed). Runs on glibc
+    (AsmRuntime=Libc), entered through AsmFoundation.Sdk's crt1.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AsmRuntime>Libc</AsmRuntime>
+    <AsmLibraryName>greeter_client</AsmLibraryName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/GrpcAsm/GrpcAsm.asmproj" />
+  </ItemGroup>
+</Project>

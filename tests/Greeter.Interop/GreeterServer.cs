@@ -57,8 +57,11 @@ public sealed class GreeterServer : IAsyncLifetime
             string binary = LocateBinary();
             ContainerBuilder builder = new ContainerBuilder(Image)
                 // Copied in before the start, with its execute bits: no bind mount, so this
-                // works the same from Windows, macOS and Linux hosts.
-                .WithResourceMapping(await File.ReadAllBytesAsync(binary), "/greeter/greeter", fileMode: Unix.FileMode755)
+                // works the same from Windows, macOS and Linux hosts. FilePath.Of, not a bare
+                // string: Testcontainers 4.17 made the string overload obsolete (CS0618, an
+                // error here), as KvAsm's own tests found (KvAsm 1b8297b).
+                .WithResourceMapping(await File.ReadAllBytesAsync(binary), FilePath.Of("/greeter/greeter"),
+                    fileMode: Unix.FileMode755)
                 .WithEntrypoint("/greeter/greeter")
                 .WithEnvironment("GREETER_PORT", ContainerPort.ToString(System.Globalization.CultureInfo.InvariantCulture))
                 .WithEnvironment("GREETER_WORKERS", "2")

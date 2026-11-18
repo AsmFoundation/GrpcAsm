@@ -460,6 +460,11 @@ matrix, CI, and the engine's own configuration struct (below).
 
 ## Milestone D — GrpcAsm client
 
+**Status (2026-11-18): D1, unary calls, is done.** Streaming calls (D2) are
+next in D.
+
+**As first planned:**
+
 - **The HTTP/2 client side:**
   - preface and SETTINGS, odd stream ids, flow control;
   - an HPACK *encoder* (KvAsm only decodes): the static table plus a dynamic
@@ -472,6 +477,116 @@ matrix, CI, and the engine's own configuration struct (below).
   - a blocking convenience layer for C and Python.
 - **Measure it against the benchmark client KvAsm uses** (kvbench on nghttp2,
   which tops out near 9.3M requests/s on the test machine).
+
+**D1, unary calls (done):**
+
+- **`src/GrpcAsm/client.asm`** (contract: `include/grpcasm_client.inc`).
+  A `GaClient` is one connection, driven by one thread at a time, with no
+  locks. There are two ways to drive it, and both share every line of the
+  protocol code:
+  - **Socket mode:** `ga_client_connect` resolves the host and connects,
+    trying each address with a timeout, then exchanges the prefaces.
+    `ga_client_poll` waits, reads and flushes, and `ga_client_unary` blocks
+    until its call completes (on timeout: RST_STREAM CANCEL and
+    DEADLINE_EXCEEDED).
+  - **Bytes in, bytes out:** `ga_client_new`, `ga_client_input` and
+    `ga_client_output`/`_consume`, for a program that owns its sockets
+    (kvbench).
+- **Calls:**
+  - A call is issued with a method handle (`ga_client_method`); the request
+    is framed into the output at once. Nothing is sent until a flush, so
+    calls issued back to back leave in one send.
+  - Completion is a callback on the driving thread:
+    `done(context, status, message, response)`.
+  - Calls above the client's limit, or the server's
+    MAX_CONCURRENT_STREAMS, wait in a FIFO queue. Callbacks may issue calls,
+    which keeps a pipeline full.
+- **Where the time goes:**
+  - **Request headers:** a method's header block is encoded once with the
+    dynamic table (`:path`, `:authority`, `content-type`, `te` inserted).
+    From its second call it is 6 indexed bytes, cached in the method and
+    copied with two 8-byte moves. The encoder generation retires every cached
+    block when the table moves.
+  - **Frame layout:** HEADERS and the call's DATA leave back to back, which
+    the server engine's fused path expects.
+  - **Responses** are parsed in place. A response whose frames arrive within
+    one input reaches its callback as a pointer into that input. Only one
+    that spans inputs is copied, once, at the end of the input.
+  - **Response headers** go through the engine's decoder: `:status 200` and
+    `grpc-status` are recognized from cached meanings
+    (`HF_GRPC_STATUS`/`HF_GRPC_MESSAGE` added to hpack.inc).
+  - **Flow control:** every window is the protocol maximum, topped up at
+    half.
+- **Protocol coverage:** the client's side of RFC 9113 — SETTINGS first,
+  PING, GOAWAY (calls above the last stream id fail UNAVAILABLE, the others
+  finish), RST_STREAM mapped as gRPC does, both directions of flow control,
+  CONTINUATION bounds, padding, PRIORITY validation, PUSH_PROMISE refused,
+  1xx skipped, malformed responses as stream errors, and HPACK size updates
+  when the server shrinks its table. gRPC: Trailers-Only, the HTTP status
+  mapping, percent-decoded `grpc-message`, exactly one uncompressed message.
+- **The C ABI:** `grpcasm_client_*` in `grpcasm.h` (12 functions, version
+  `GRPCASM_0.1`), thin tail jumps in `GrpcAsm.Native/capi_client.asm`.
+- **NASM:** `samples/GreeterClient` (`greeter_client`, 107 KB) calls
+  SayHello from assembly, with no routes and no server hooks. Two engine
+  changes made that possible:
+  - `routes_default.asm`: an archive member holding an empty `ga_app_routes`,
+    which only a program without a table pulls in;
+  - `ga_pb_field_bytes` moved, unchanged, from `grpc.asm` to `pb.asm`.
+    Previously, decoding protobuf dragged in the server's call layer and its
+    hooks.
+- **Verified:**
+  - `tests/client.sh`: `client_test.c` against the Greeter (a 20,000-call
+    pipeline, bytes mode), against `capi_server` (statuses, percent-decoding,
+    a 3 MiB response, a 2 MiB request past the stream window, max_response,
+    the queue, a dropped connection), and against a scripted HTTP/2 server
+    in the test (1xx, CONTINUATION, padding, Trailers-Only, HTTP 503,
+    REFUSED_STREAM, malformed + RST_STREAM back, PING, GOAWAY, deadlines,
+    the server leaving, a table size of 0, one stream at a time, a response
+    split at every byte). Then the NASM client against the Greeter.
+  - Three planted bugs: two were caught. The third, a pending size update
+    bypassing the block cache, changed no result. It was redundant (the
+    generation already covers it), so the check was removed from the hot
+    path.
+  - `ClientInteropTests`: the NASM client calls a Greeter that grpc-dotnet
+    (Kestrel) serves in the test process, through Testcontainers' host port
+    forwarding:
+    - 200 calls on one connection, so Kestrel's decoder accepts the indexed
+      headers;
+    - a status with its message;
+    - a UTF-8 message percent-decoded back;
+    - a 200 KB reply.
+  - The engine's other gates after the hpack and pb changes: the Greeter
+    (h2spec 146/146), the C Greeter, capi, and KvAsm's whole suite.
+- **Measured** (`benchmarks/endtoend/2026-11-18-client`): kvbench with its
+  own nghttp2 module against a `grpcasm` module on this client. The same
+  load generator, workload and checks drive both, against KvAsm 0.3.0 with
+  4 workers, in paired blocks:
+  - **Client CPU per request:** 0.37–0.42× nghttp2's in every shape.
+  - **Client-bound** (2 client vCPUs): 2.54× the throughput (6/6 blocks),
+    p50 0.45×, and 17% less server CPU per request.
+  - **Server-bound, blocking clients on one machine** (KvAsm's standard
+    shape): 0.95× the throughput and 25% more server CPU per request.
+    Measured cause: the server's `sendto()` wakes the idle client thread.
+    Both clients deliver 15.8 requests per server read, which ruled out
+    smaller batches.
+  - **The same shape with busy-polling clients** (no wakeups, like a remote
+    client): 1.48× the throughput and 23% less server CPU per request.
+  - A two-machine run, which would settle the server-bound case for real,
+    needs a second host.
+
+**What is left in D:**
+
+- **D2, streaming calls:** client streaming (request messages as the caller
+  produces them) and server streaming (response messages to a callback as
+  they arrive), with per-stream window updates. KvAsm's Upload and Download
+  are the reference.
+- **Transparent reconnection:** today a connection that used up its stream
+  ids, or got GOAWAY, refuses new calls (`-ESHUTDOWN`), and the caller opens
+  a new client. At 2.5M calls/s, a connection uses up its ids in about 7
+  minutes.
+- **Per-call deadlines on the wire** (`grpc-timeout`); today only
+  `ga_client_unary` has a deadline, and it is enforced by the client alone.
+- **A two-machine measurement** of the server-bound case.
 
 ## Milestone E — packages and release 0.1.0
 

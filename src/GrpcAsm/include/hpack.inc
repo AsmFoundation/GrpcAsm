@@ -33,13 +33,21 @@
 %define HF_CONTENT_LENGTH   11
 %define HF_CONN_SPECIFIC    12          ; connection, keep-alive, proxy-connection,
                                         ; transfer-encoding, upgrade (malformed, RFC 9113 §8.2.2)
+; Response fields the client (client.asm) acts on. A server that meets them
+; in a request treats them as any other regular field (h2n.asm's
+; field_handler ignores codes it does not list), so they cost the server
+; nothing but two length compares when a literal name is classified.
+%define HF_GRPC_STATUS      13          ; grpc-status: the call's status, in trailers
+%define HF_GRPC_MESSAGE     14          ; grpc-message: its percent-encoded text
 
 ; ---- value classes (bits 8-15), meaning depends on the code ----------------------
 %define VC_EMPTY            0x80        ; the value is empty (with any code)
 %define VC_POST             1           ; :method POST
 %define VC_HEAD             2           ; :method HEAD (a 405 without a body)
 %define VC_OK               1           ; content-type application/grpc[+...|;...],
-                                        ; te: trailers, grpc-encoding: identity
+                                        ; te: trailers, grpc-encoding: identity,
+                                        ; :status 200 (the client's fast path: a
+                                        ; successful response needs no digit parsing)
 ; :path classes are the route ids of server.inc: M_UNKNOWN 0, M_GET 1,
 ; M_PUT 2, M_DELETE 3, M_HEALTH 4, M_UPLOAD 5, M_DOWNLOAD 6.
 
