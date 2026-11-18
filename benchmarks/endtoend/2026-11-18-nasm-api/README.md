@@ -41,6 +41,15 @@ few nanoseconds. The server's one core spends about 1.34 µs per call end to end
 per second, kernel included), so the difference is under 1%. That is below this host's noise,
 with other programs busy outside the VM (see `2026-11-18-client/README.md`).
 
+> **Correction (2026-11-18, milestone C4).** "1.34 µs per call" was the client's pace, not
+> the server's cost: this h2load setup is client-bound. The server's CPU time, measured in
+> [`2026-11-18-dotnet`](../2026-11-18-dotnet/README.md) with the same shape, shows the
+> worker busy only about a third of the time. The assembly Greeter costs **400 to 540 ns of
+> server CPU per call**, kernel included, depending on the client's pace. The conclusion
+> stands for another reason: 23 instructions are a few nanoseconds of that. This end-to-end
+> comparison could not have shown them either way. The callgrind counts above are exact,
+> independent of load, and stand.
+
 Both Greeters pass the same suite: exact answers, h2spec 146/146, the 12 grpc-dotnet interop
 tests. The first reply on each connection, and every message larger than a frame (the interop
 tests send up to 1 MiB), take `ga_h2n_reply_begin`'s buffered path. The rest are written in

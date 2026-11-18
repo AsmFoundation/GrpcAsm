@@ -8,6 +8,17 @@ adapter's frame. `samples/GreeterC` also `malloc`s and copies each reply.
 **Answer:** nothing measurable end to end. The two medians are 0.15% apart,
 well inside the spread between rounds.
 
+> **Correction (2026-11-18, milestone C4).** This setup is client-bound, so it
+> could not have shown a cost on the server's side. The server's CPU time,
+> measured in [`2026-11-18-dotnet`](../2026-11-18-dotnet/README.md) with the
+> same h2load shape, shows the assembly Greeter's worker busy only about a
+> third of the time. Equal calls per second followed from that. The CPU time
+> per call does show the cost: the C Greeter takes **11 to 56 ns more server
+> CPU per call** than the assembly one. That is the function-pointer call, the
+> `malloc`, the copy and the `free`, out of 400 to 540 ns per call; the paired
+> medians of three runs vary with the host's load. "Nothing measurable" is
+> withdrawn: the cost is small, not zero.
+
 ## Results
 
 One worker, pinned to vCPU 31 of 32. `h2load` ran on vCPUs 29–30 with 8

@@ -353,7 +353,7 @@ matrix, CI, and the engine's own configuration struct (below).
 
 ## Milestone C — the APIs
 
-**Status (2026-11-18): C1, C2 and C3 are done. C4 is next.**
+**Status (2026-11-18): C1, C2, C3 and C4 are done. C5, Python, is next in C.**
 
 **The steps (planned 2026-11-17, after milestone B):**
 
@@ -422,7 +422,11 @@ matrix, CI, and the engine's own configuration struct (below).
       and a dropped connection.
   - **Measured** (`benchmarks/endtoend/2026-11-17-c-abi`, h2load, one worker):
     the assembly Greeter served a median of 755,153 calls/s and the C Greeter
-    753,994, a difference of 0.15%.
+    753,994, a difference of 0.15%. **Corrected in C4:** that setup is
+    client-bound (the worker is about a third busy), so equal calls per second
+    could not show the C handler's cost. The server's CPU time per call does:
+    +11 to +56 ns over the assembly Greeter's 400–540 ns
+    (`benchmarks/endtoend/2026-11-18-dotnet`).
 - **C3, the NASM API (done).** `src/GrpcAsm/include/grpcasm.inc`:
   - **Declaring a service:** `GA_SERVICE "pkg.Service"`, then `GA_UNARY
     "Method", handler [, route]` and `GA_CLIENT_STREAM "Method", data, end
@@ -472,14 +476,100 @@ matrix, CI, and the engine's own configuration struct (below).
     - **The Greeter, under callgrind:** 723.2 → 700.3 instructions per
       SayHello (−3.2%; `benchmarks/endtoend/2026-11-18-nasm-api`). End to
       end with h2load the two are indistinguishable (median 747,106 vs
-      746,011 req/s): 23 instructions are under 1% of the call.
+      746,011 req/s). As C4 found, that setup is client-bound and could not
+      have shown them. The call costs 400–540 ns of server CPU, and 23
+      instructions are a few nanoseconds of it.
     - **KvServer, in process** (`benchmarks/inprocess/2026-11-18-c3`): GET
       67.68 → 67.29 ns median and the health check 39.79 → 39.87, both
       within noise, with byte-identical answers. The port costs nothing.
-- **C4, .NET** (`GrpcAsm.Net`, over the C ABI): `[UnmanagedCallersOnly]`
-  handlers, typed handlers through Google.Protobuf, and raw handlers over
-  spans. Whether handlers run inline on the event loop or on the thread pool
-  is decided by measurement.
+- **C4, .NET (done).** `src/GrpcAsm.Net`, over the C ABI: every call is a
+  `[LibraryImport]` of `libgrpcasm.so`, which the project reference to
+  `GrpcAsm.Native` copies next to every program that uses it.
+  - **`GrpcAsmServer`:** options mapped onto `grpcasm_options` (range errors
+    are exceptions), `AddUnary` with a raw handler
+    (`(ReadOnlySpan<byte> request, GrpcAsmCall call)`) or a typed one
+    (`Func<TRequest, TResponse>` over Google.Protobuf), `Start`, `Stop` (the
+    totals), `Dispose`.
+    - **Inline handlers:** every method enters through one
+      `[UnmanagedCallersOnly]` function. It finds the handler through the
+      method's `GCHandle` and runs it on the worker that read the request:
+      no queue, no thread switch, no allocation by the library.
+    - **`GrpcAsmCall`** is a `ref struct`, so a handler cannot keep the call
+      past its return, when the engine frees it. `Reply(span)` and
+      `Fail(status, message)` call `grpcasm_call_reply`/`_fail`; a second
+      answer is `InvalidOperationException`.
+    - **Exceptions never cross into assembly:** an `RpcException` is answered
+      with its status, anything else INTERNAL ("Exception was thrown by
+      handler.", grpc-dotnet's text). An exception after an answer leaves the
+      answer standing. Out of memory ends the connection, as the C ABI
+      requires.
+    - **Typed handlers:** a request that does not parse is INVALID_ARGUMENT
+      "malformed request message", as the engine's own services answer it.
+      Google.Protobuf also refuses a `string` field that is not valid UTF-8.
+      A reply up to 1 KiB is serialized on the stack, a larger one into a
+      rented buffer; the engine copies it once, into its output.
+    - **`GrpcAsmProtobuf.TryGetBytes`:** `grpcasm_pb_bytes` for raw handlers.
+      A field comes back as a slice of the request: no allocation, and
+      exactly what the engine's decoder accepts.
+  - **Inline only, for now by necessity.** The C ABI's contract is that a
+    handler answers before it returns, so a call cannot move to the thread
+    pool. Offloading (for handlers that block) needs an asynchronous answer
+    in the C ABI first: a call handle that outlives its handler, and a way
+    to wake the worker when another thread answers. That belongs with the
+    streaming calls of "Later in C". What inline costs is measured below.
+    What an offload would cost is not measured yet.
+  - **`GrpcAsmClient`:** the assembly client in its bytes-in, bytes-out mode,
+    driven by a .NET `Socket`.
+    - `ConnectAsync`, `Method(path)`, `CallAsync` (raw bytes, or typed with a
+      `MessageParser`), returning `Task`s.
+    - One lock serializes the native client, so calls may come from any
+      thread.
+    - A receive loop feeds `grpcasm_client_input` from a pinned 256 KiB
+      buffer. A `Channel`-fed send loop coalesces the output.
+    - Each call's `TaskCompletionSource` travels as a `GCHandle` through the
+      C callback and completes asynchronously, so no continuation runs under
+      the lock.
+    - A lost connection fails the calls in flight UNAVAILABLE with the
+      reason. `DisposeAsync` fails them CANCELLED "client closed".
+  - **The library checks its ABI.** P/Invoke binds symbols by name, without
+    the ELF version a C linker checks. So the first server or client
+    compares `grpcasm_version()` with the 0.1 ABI this assembly was written
+    against and throws `BadImageFormatException` on a mismatch, as .NET does
+    for a native library of the wrong architecture.
+  - **`samples/GreeterNet`:** SayHello in C#, with the other Greeters'
+    settings, log lines and exit codes. `GREETER_MODE` picks the typed or the
+    raw handler.
+  - **Verified:**
+    - `tests/GrpcAsm.Net.Tests`, 28 tests, run on Linux (CI natively,
+      `tests/dotnet.sh` in a container from Windows). The server's handlers
+      are called by grpc-dotnet: typed, raw, 1 MiB each way, every failure
+      path, health, 2,000 concurrent calls, one server per process. The client
+      is tested against that server and against grpc-dotnet's Kestrel, with
+      8 threads × 1,250 calls, a dropped connection and a dispose with calls
+      in flight. The protobuf helper's cases include malformed messages and
+      the slice offsets. A mutant that breaks the offset arithmetic fails 2
+      tests.
+    - `tests/greeter_net.sh` publishes GreeterNet self-contained and runs the
+      assembly Greeter's suite on it, once per handler. Both pass every
+      phase: exact answers, h2spec 146/146, refusals, a clean SIGTERM.
+  - **Measured** (`benchmarks/endtoend/2026-11-18-dotnet`): the server's CPU
+    time per call, paired within rounds against the assembly Greeter (540 ns
+    in that setup), at steady state:
+    - C: +11 ns;
+    - .NET raw: +77 ns. That is three managed/native transitions per call:
+      the reverse call, `grpcasm_pb_bytes` and `grpcasm_call_reply`;
+    - .NET typed: +201 ns. Google.Protobuf parses and serializes, with two
+      strings and two objects per call.
+
+    The precision is tens of nanoseconds on this loaded host (without the
+    two interfered rounds: +37, +105, +228). Two findings came with it:
+    - **The setup is client-bound.** The worker is a third to a half busy, so
+      h2load's calls per second cannot compare servers, and the earlier C2
+      and C3 end-to-end readings were corrected.
+    - **The typed handler's tiered JIT needs 5–12 s of load to converge**
+      when its thread shares the worker's vCPU. A 0.3 s warm-up measured
+      +587 ns. With tiering off it is +300 ns: optimized at once, without
+      PGO.
 - **C5, Python** (`grpcasm`, over the C ABI): ctypes, so there are no build
   dependencies. A wheel bundles `libgrpcasm.so`.
 - **Later in C:** streaming calls through the C ABI (client streaming as it
@@ -673,6 +763,15 @@ next in D.
     against glibc's.
 - **Python handlers** run under the GIL. The transport stays in assembly, but
   handler throughput is Python's.
+- **.NET handlers run inline.**
+  - A handler that blocks (I/O, a lock, a long computation) stalls every
+    connection of its worker. Until the C ABI has an asynchronous answer,
+    such work needs its own threads and a handler that only reads their
+    results.
+  - The typed path allocates per call, so its cost includes the GC.
+  - Its JIT converges only after seconds of load. Services that need their
+    best numbers from the first second can turn tiering off and give up PGO
+    (+300 ns against +201 ns per call in C4's measurement).
 - **The NuGet ID** `GrpcAsm` was free on 2026-11-18 (nuget.org answers 404).
   Check it again before the first push.
   - The `AsmFoundation.*` prefix already carries AsmSdk's packages.

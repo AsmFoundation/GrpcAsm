@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    GrpcAsm.Net: GrpcAsm from .NET, over the C ABI of libgrpcasm.so (milestone C4).
+
+      GrpcAsmServer  a gRPC server whose HTTP/2, HPACK and event loops are the assembly engine;
+                     .NET handlers (raw spans, or Google.Protobuf messages) run inline on its
+                     worker threads through [UnmanagedCallersOnly] reverse calls
+      GrpcAsmClient  the assembly client in its bytes-in, bytes-out mode, driven by a .NET
+                     Socket: thread-safe CallAsync returning Tasks
+
+    The ProjectReference to GrpcAsm.Native builds libgrpcasm.so and copies it next to this
+    assembly and, transitively, next to every program that references it (AsmFoundation.Sdk's
+    csproj -> asmproj rule), where [LibraryImport("grpcasm")] finds it. Linux x64 only: the
+    library is an ELF file. Packaging (a NuGet package with runtimes/linux-x64/native) is
+    milestone E.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- [LibraryImport] source generation and the reverse-call entry points use pointers. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <RootNamespace>GrpcAsm.Net</RootNamespace>
+    <!-- Every public member documented: missing docs are errors (TreatWarningsAsErrors). -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Versions as in tests/Directory.Packages.props (KvAsm's client solution's). -->
+    <PackageReference Include="Google.Protobuf" Version="3.36.2" />
+    <PackageReference Include="Grpc.Core.Api" Version="2.85.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../GrpcAsm.Native/GrpcAsm.Native.asmproj" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    GrpcAsm.Net's tests (milestone C4): the .NET API over libgrpcasm.so, in both directions.
+      GrpcAsmServer  .NET handlers (typed and raw) inline on the engine's workers, called by
+                     grpc-dotnet (Grpc.Net.Client) in the same process
+      GrpcAsmClient  the assembly client from .NET, against that server and against grpc-dotnet's
+                     own server (Kestrel), plus a server that drops the connection
+
+    Linux x64 only (libgrpcasm.so is an ELF file): elsewhere every test is skipped with the
+    reason, unless GRPCASM_REQUIRE_LINUX=1 (CI) turns that into a failure. On Windows, run them
+    in a Linux container: tests/dotnet.sh.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <!-- xunit.v3 test projects are self-hosting executables. -->
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>GrpcAsm.Net.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Kestrel and Grpc.AspNetCore: the grpc-dotnet server GrpcAsmClient is tested against. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Google.Protobuf" />
+    <PackageReference Include="Grpc.AspNetCore" />
+    <PackageReference Include="Grpc.HealthCheck" />
+    <PackageReference Include="Grpc.Net.Client" />
+    <PackageReference Include="Grpc.Tools" PrivateAssets="All" />
+    <PackageReference Include="xunit.v3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/GrpcAsm.Net/GrpcAsm.Net.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The interop project's helloworld.proto, both sides generated here (its own namespace). -->
+    <Protobuf Include="../Greeter.Interop/Protos/helloworld.proto" Link="Protos/helloworld.proto"
+              GrpcServices="Both" />
+  </ItemGroup>
+
+</Project>

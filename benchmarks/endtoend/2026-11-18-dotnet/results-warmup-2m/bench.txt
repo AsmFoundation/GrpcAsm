@@ -1,0 +1,23 @@
+server on vCPU 31 (1 worker, the whole process), h2load on 29,30; 4 rounds; 2000000 warm-up + 400000 measured calls per run; variants: asm c net-raw net-typed
+round  1  asm              713581 req/s    346.3 server-ns/call  server busy  24.0%
+round  1  c                725974 req/s    392.3 server-ns/call  server busy  27.8%
+round  1  net-raw          664623 req/s    436.0 server-ns/call  server busy  28.3%
+round  1  net-typed        756644 req/s   1134.4 server-ns/call  server busy  83.6%
+round  2  c                666998 req/s    460.8 server-ns/call  server busy  29.9%
+round  2  net-raw          581392 req/s    693.8 server-ns/call  server busy  39.4%
+round  2  net-typed        738602 req/s   1161.7 server-ns/call  server busy  83.3%
+round  2  asm              724656 req/s    375.6 server-ns/call  server busy  26.5%
+round  3  net-raw          669963 req/s    516.9 server-ns/call  server busy  33.8%
+round  3  net-typed        747701 req/s   1134.4 server-ns/call  server busy  82.4%
+round  3  asm              642886 req/s    443.5 server-ns/call  server busy  27.9%
+round  3  c                664018 req/s    438.6 server-ns/call  server busy  28.4%
+round  4  net-typed        626651 req/s   1463.9 server-ns/call  server busy  89.6%
+round  4  asm              680174 req/s    431.6 server-ns/call  server busy  28.5%
+round  4  c                696675 req/s    480.6 server-ns/call  server busy  32.7%
+round  4  net-raw          700329 req/s    535.6 server-ns/call  server busy  36.6%
+
+variant                            median req/s        min        max   server-ns/call paired extra ns/call [range]
+asm                                      696877     642886     724656            403.6         +0.0 [+0.0 .. +0.0]
+c                                        681836     664018     725974            449.7        +47.5 [-4.9 .. +85.2]
+net-raw                                  667293     581392     700329            526.2        +96.8 [+73.4 .. +318.2]
+net-typed                                743151     626651     756644           1148.1       +787.1 [+690.9 .. +1032.3]

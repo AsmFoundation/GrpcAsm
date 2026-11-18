@@ -3,13 +3,16 @@
   <Folder Name="/src/">
     <Project Path="src/GrpcAsm/GrpcAsm.asmproj" Type="13B669BE-BB05-4DDF-9536-439F39A36129" />
     <Project Path="src/GrpcAsm.Native/GrpcAsm.Native.asmproj" Type="13B669BE-BB05-4DDF-9536-439F39A36129" />
+    <Project Path="src/GrpcAsm.Net/GrpcAsm.Net.csproj" />
   </Folder>
   <Folder Name="/samples/">
     <Project Path="samples/Greeter/Greeter.asmproj" Type="13B669BE-BB05-4DDF-9536-439F39A36129" />
     <Project Path="samples/GreeterClient/GreeterClient.asmproj" Type="13B669BE-BB05-4DDF-9536-439F39A36129" />
+    <Project Path="samples/GreeterNet/GreeterNet.csproj" />
     <Project Path="samples/KvServer/KvServer.asmproj" Type="13B669BE-BB05-4DDF-9536-439F39A36129" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Greeter.Interop/Greeter.Interop.csproj" />
+    <Project Path="tests/GrpcAsm.Net.Tests/GrpcAsm.Net.Tests.csproj" />
   </Folder>
 </Solution>

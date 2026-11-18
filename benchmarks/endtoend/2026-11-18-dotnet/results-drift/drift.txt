@@ -1,0 +1,32 @@
+drift.sh — GreeterNet's server CPU ns per call in successive 400,000-call windows, with the
+seconds since the server started (2026-11-18, host load outside the VM 55-91% of 32 logical
+CPUs; the same image, vCPUs and h2load shape as bench.sh). Format: <ns per call>@<seconds>.
+
+== First probe (an earlier version of drift.sh, which also printed RSS and threads)
+
+typed: 1414 993 1116 1187 1303 1952 898 916 725 676 926 946 ns per call, windows 1-12
+       RSS 47,728 -> 51,256 KiB (flat after window 6), 9 threads throughout: no leak
+raw:   613 590 527 505 430 575 ns per call, windows 1-6; RSS 29,060 -> 29,268 KiB, 9 threads
+
+== Two passes, three JIT settings each (drift.sh as committed)
+
+typed default: 1624@1.0s 1920@4.1s 1891@5.0s 1663@5.8s 1653@6.7s 1147@7.6s 1672@8.9s 1107@9.7s 1252@10.7s 1216@11.7s 832@12.4s 1068@13.3s 991@14.0s 802@14.7s
+typed DOTNET_TieredCompilation=0: 1378@0.9s 1051@1.7s 968@2.4s 935@3.1s 964@3.7s 1023@4.4s 977@5.2s 946@5.9s 864@6.5s 816@7.1s 1047@7.9s 921@8.6s 963@9.3s 1048@10.0s
+typed DOTNET_TieredPGO=0: 1587@1.0s 1712@2.0s 1861@3.0s 1035@3.7s 1105@4.5s 1373@5.5s 962@6.3s 936@6.9s 1077@7.7s 908@8.4s 1021@11.2s 891@11.9s 837@12.6s 789@13.2s
+typed default: 1333@0.7s 1112@1.3s 1258@2.0s 1189@2.6s 1281@3.2s 1266@3.8s 1260@4.4s 699@5.0s 643@5.5s 626@6.1s 593@6.7s 634@7.2s 686@7.8s 708@8.4s
+typed DOTNET_TieredCompilation=0: 901@0.7s 783@1.3s 847@1.8s 836@2.4s 909@3.0s 1009@3.6s 876@4.3s 809@4.9s 827@5.5s 886@6.2s 1166@7.0s 1064@7.8s 1980@9.0s 1405@10.0s
+typed DOTNET_TieredPGO=0: 3127@1.9s 3184@3.8s 2560@5.6s 2488@7.5s 2734@11.5s 1775@12.8s 1241@13.7s 911@14.5s 980@15.2s 1088@16.1s 2374@18.0s 3034@20.1s 3201@22.4s 2963@24.5s
+
+== Reading
+
+- With tiering on (the default), the typed handler drops to its steady cost only after 5 s
+  (second pass) to 12 s (first pass) of load: the JIT's background thread shares the
+  worker's vCPU, and tiered PGO recompiles twice (instrumented tier, then tier 1).
+- Once converged, tiering on beats tiering off (593-708 against 783-1,048 in the second
+  pass): PGO pays for the wait.
+- With tiering off, the cost is flat from the second window: everything is compiled
+  optimized at the first call, without PGO.
+- The last pass (TieredPGO=0, second time) ran through heavy host interference: windows took
+  2 s instead of 0.6 s, and the costs tripled. It shows the noise this host adds, not the JIT.
+- Hence bench.sh's 7,000,000-call warm-up (about 10 s), and its tiering-off variant, which
+  checks in every round that the default had converged.

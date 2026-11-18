@@ -21,8 +21,10 @@ between the network and their code.
 - **Four ways to use it:**
   - NASM (`grpcasm.inc`, here today: services declared in a few lines, the
     dispatch generated at assembly time, replies written in place);
-  - a C ABI (`grpcasm.h`, `libgrpcasm.so` / `.a`);
-  - .NET (`GrpcAsm.Net`);
+  - a C ABI (`grpcasm.h`, `libgrpcasm.so` / `.a`; the shared library is here
+    today);
+  - .NET (`GrpcAsm.Net`, here today: inline handlers, and the client behind
+    `Task`s);
   - Python, through the C ABI.
 - **Distributed as NuGet packages.** It builds with
   [AsmSdk](https://github.com/AsmFoundation/AsmSdk) (`AsmFoundation.Sdk`),
@@ -59,12 +61,43 @@ AsmSdk's bundled toolchain.
   [`include/grpcasm.h`](src/GrpcAsm.Native/include/grpcasm.h): register unary
   handlers at run time, then start and stop the server, or run it until a
   signal. Answers go through `grpcasm_call_reply` and `grpcasm_call_fail`. The
-  .NET and Python APIs will build on it.
+  .NET API builds on it, and the Python API will.
+- **`src/GrpcAsm.Net`:** GrpcAsm from .NET, over the C ABI. A server whose
+  handlers run inline on the engine's worker threads, and the assembly client
+  behind `Task`s:
+
+  ```csharp
+  using var server = new GrpcAsmServer(new GrpcAsmServerOptions { Port = 50051, Workers = 4 });
+  server.AddUnary<HelloRequest, HelloReply>("/helloworld.Greeter/SayHello",
+      request => new HelloReply { Message = "Hello " + request.Name });
+  server.Start();
+
+  await using GrpcAsmClient client = await GrpcAsmClient.ConnectAsync("127.0.0.1", 50051);
+  HelloReply reply = await client.CallAsync(client.Method("/helloworld.Greeter/SayHello"),
+      new HelloRequest { Name = "asm" }, HelloReply.Parser);
+  ```
+
+  - **Handlers:** typed (Google.Protobuf), or raw over spans, with
+    `GrpcAsmProtobuf.TryGetBytes` reading fields in place through the
+    engine's decoder. A handler answers before it returns, as the C ABI
+    requires, so a handler that blocks stalls its worker.
+  - **Exceptions** are answered (`RpcException` with its status, anything
+    else INTERNAL) and never cross into the engine.
+  - **The cost of a .NET handler** at steady state, in server CPU per call,
+    paired against the assembly Greeter's 540 ns: +77 ns raw and +201 ns
+    typed. A C handler costs +11 ns. The typed handler reaches its steady
+    state after seconds of load, once the tiered JIT has converged
+    ([evidence](benchmarks/endtoend/2026-11-18-dotnet/README.md), with its
+    precision).
 - **`samples/Greeter`:** `helloworld.Greeter/SayHello` on the engine alone,
   declared with the NASM API. It is the smallest complete application, and
   the generic test service.
 - **`samples/GreeterC`:** the same service in C on `libgrpcasm.so`. From
   outside, it is indistinguishable from the assembly Greeter.
+- **`samples/GreeterNet`:** the same service in C#, on `GrpcAsmServer`, with
+  a typed and a raw handler (`GREETER_MODE`). It passes the Greeter's suite
+  with either. One input differs, by protobuf's rules: the typed handler
+  refuses a name that is not valid UTF-8.
 - **`samples/KvServer`:** KvAsm's key-value service on the engine. It is the
   reference consumer, held to KvAsm's whole end-to-end suite.
 - **The client** (`src/GrpcAsm/client.asm`, `include/grpcasm_client.inc`; in
@@ -99,13 +132,15 @@ Then, with Docker:
 | `tests/capi.sh` | The C ABI's contract: every error code, the lifecycle, every call function through `nghttp` |
 | `tests/nasmapi.sh` | The code `grpcasm.inc` generates, called directly: the route table, the dispatch as alias, compare chain and jump table, the health check, the hooks |
 | `tests/client.sh` | The client against the Greeter, `capi_server` and a scripted HTTP/2 server (GOAWAY, RST_STREAM, 1xx, CONTINUATION, deadlines, a response split at every byte, ...), then the NASM client |
+| `tests/dotnet.sh` | GrpcAsm.Net's 28 tests on Linux (in the .NET SDK image; on a Linux machine, `dotnet test --project tests/GrpcAsm.Net.Tests -c Release`): .NET handlers called by grpc-dotnet, the client against them and against Kestrel, the protobuf helper |
+| `tests/greeter_net.sh` | The .NET Greeter, published self-contained, through the Greeter's suite with each handler |
 | `dotnet test --project tests/Greeter.Interop -c Release` | grpc-dotnet against the Greeter (sizes up to 1 MiB, 1,000 concurrent calls, health, error statuses), and the NASM client against a grpc-dotnet (Kestrel) server |
 | `tests/kvsuite.sh <KvAsm checkout>` | KvAsm's end-to-end suite against KvServer: protocol, streaming, shutdown, h2spec, the fuzzer |
 | `benchmarks/inprocess/bench_ga.sh` | The request path timed in process against KvAsm 0.3.0 (see its header) |
 
 - **The shell suites** run in KvAsm's toolchain image:
   `docker build --target toolchain -t kvasm-toolchain <KvAsm checkout>`.
-- **The .NET tests** start the Greeter in a stock `debian:bookworm-slim`
+- **The interop tests** start the Greeter in a stock `debian:bookworm-slim`
   container through Testcontainers.
 
 ## License

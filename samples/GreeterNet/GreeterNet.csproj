@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    GreeterNet: helloworld.Greeter/SayHello on GrpcAsmServer, the handler in C# (milestone C4).
+    The same service as samples/Greeter (NASM) and samples/GreeterC (C), with the same
+    settings, log lines and exit codes: tests/greeter_net.sh runs the Greeters' suite on it,
+    and benchmarks/endtoend/2026-11-18-dotnet measures the three side by side (what an inline
+    .NET handler costs per call).
+
+    GREETER_PORT (1..65535, default 50051), GREETER_WORKERS (1..256, default 1), GREETER_MODE:
+    "typed" (default, Google.Protobuf messages) or "raw" (GrpcAsmProtobuf finds the name in
+    place, the reply is framed by hand). Stops on SIGTERM or SIGINT and logs the server's
+    totals. Linux x64 (libgrpcasm.so); to run it in another Linux image, publish it
+    self-contained: dotnet publish -c Release -r linux-x64 (tests/greeter_net.sh does).
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- No ICU: the sample formats nothing culture-specific, and a self-contained publish then
+         runs in any glibc image (the benchmark runs it next to h2load in kvasm-toolchain). -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Grpc.Tools" Version="2.85.0" PrivateAssets="All" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/GrpcAsm.Net/GrpcAsm.Net.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Messages only: GrpcAsmServer is the server, so no grpc-dotnet service code. -->
+    <Protobuf Include="../../tests/Greeter.Interop/Protos/helloworld.proto" Link="Protos/helloworld.proto"
+              GrpcServices="None" />
+  </ItemGroup>
+</Project>

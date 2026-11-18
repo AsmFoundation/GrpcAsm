@@ -1,0 +1,7 @@
+date: 2026-11-18T06:20:21Z
+grpcasm: 64ecffb + 7 uncommitted paths
+dotnet: SDK 11.0.100, GreeterNet self-contained (its runtime: Microsoft.NETCore.App.Runtime.linux-x64/10.0.15)
+bench: rounds 4, variants asm c net-raw net-typed, warm-up 2000000, measured 400000
+host load before (whole PC, % of its logical CPUs, 5 s): 72.6
+containers running: claude-desktops-winhost fastrun-aot buildx_buildkit_fastrun0 kvnode-dev 
+host load after (whole PC, % of its logical CPUs, 5 s): 72

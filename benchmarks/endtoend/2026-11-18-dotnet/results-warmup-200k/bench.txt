@@ -1,0 +1,69 @@
+server on vCPU 31 (1 worker, the whole process), h2load on 29,30; 12 rounds; 200000 warm-up + 400000 measured calls per run
+round  1  asm           737429 req/s    350.6 server-ns/call  server busy  25.2%
+round  1  c             732641 req/s    444.4 server-ns/call  server busy  31.7%
+round  1  net-raw       776018 req/s    473.3 server-ns/call  server busy  35.8%
+round  1  net-typed     738638 req/s   1014.1 server-ns/call  server busy  72.8%
+round  2  c             742537 req/s    472.8 server-ns/call  server busy  34.2%
+round  2  net-raw       735957 req/s    583.1 server-ns/call  server busy  41.8%
+round  2  net-typed     653412 req/s   1163.0 server-ns/call  server busy  74.1%
+round  2  asm           687845 req/s    572.9 server-ns/call  server busy  38.2%
+round  3  net-raw       692548 req/s    636.4 server-ns/call  server busy  43.0%
+round  3  net-typed     679486 req/s   1133.5 server-ns/call  server busy  75.1%
+round  3  asm           684566 req/s    485.9 server-ns/call  server busy  32.4%
+round  3  c             698987 req/s    507.8 server-ns/call  server busy  34.6%
+round  4  net-typed     721824 req/s   1053.2 server-ns/call  server busy  74.1%
+round  4  asm           728907 req/s    395.2 server-ns/call  server busy  28.0%
+round  4  c             740008 req/s    486.5 server-ns/call  server busy  35.1%
+round  4  net-raw       731392 req/s    457.4 server-ns/call  server busy  32.6%
+round  5  asm           745509 req/s    372.5 server-ns/call  server busy  27.1%
+round  5  c             740279 req/s    435.7 server-ns/call  server busy  31.4%
+round  5  net-raw       740630 req/s    441.5 server-ns/call  server busy  31.9%
+round  5  net-typed     674756 req/s   1069.2 server-ns/call  server busy  70.5%
+round  6  c             680213 req/s    424.3 server-ns/call  server busy  28.1%
+round  6  net-raw       641076 req/s    530.3 server-ns/call  server busy   7.9%
+round  6  net-typed     723206 req/s    948.0 server-ns/call  server busy  66.7%
+round  6  asm           696908 req/s    484.0 server-ns/call  server busy  32.8%
+round  7  net-raw       732846 req/s    470.6 server-ns/call  server busy  33.5%
+round  7  net-typed     752235 req/s    964.7 server-ns/call  server busy  70.7%
+round  7  asm           723753 req/s    380.0 server-ns/call  server busy  26.7%
+round  7  c             704016 req/s    442.6 server-ns/call  server busy  30.4%
+round  8  net-typed     745541 req/s    957.3 server-ns/call  server busy  69.3%
+round  8  asm           624516 req/s    542.7 server-ns/call  server busy  32.9%
+round  8  c             389431 req/s    951.4 server-ns/call  server busy  36.4%
+round  8  net-raw       529271 req/s    777.3 server-ns/call  server busy  40.2%
+round  9  asm           725171 req/s    384.1 server-ns/call  server busy  27.1%
+round  9  c             698617 req/s    457.0 server-ns/call  server busy  31.1%
+round  9  net-raw       690536 req/s    536.9 server-ns/call  server busy  36.2%
+round  9  net-typed     751805 req/s    921.5 server-ns/call  server busy  67.4%
+round 10  c             733545 req/s    428.3 server-ns/call  server busy  30.6%
+round 10  net-raw       752267 req/s    453.9 server-ns/call  server busy  33.2%
+round 10  net-typed     784426 req/s    905.9 server-ns/call  server busy  69.0%
+round 10  asm           711977 req/s    401.1 server-ns/call  server busy  27.8%
+round 11  net-raw       755437 req/s    477.5 server-ns/call  server busy  35.1%
+round 11  net-typed     632794 req/s   1131.7 server-ns/call  server busy  70.1%
+round 11  asm           771545 req/s    344.4 server-ns/call  server busy  25.9%
+round 11  c             760869 req/s    393.3 server-ns/call  server busy  29.2%
+round 12  net-typed     744695 req/s    930.5 server-ns/call  server busy  67.6%
+round 12  asm           655416 req/s    423.6 server-ns/call  server busy  27.1%
+round 12  c             711436 req/s    439.1 server-ns/call  server busy  30.5%
+round 12  net-raw       725199 req/s    530.4 server-ns/call  server busy  37.5%
+
+variant     median req/s   min        max        median server-ns/call   extra ns/call vs asm (from medians)
+asm               717865     624516     771545         398.1                  +0.0 (h2load)      +0.0 (cpu)
+c                 722039     389431     760869         443.5                  -8.1 (h2load)     +45.4 (cpu)
+net-raw           732119     529271     776018         503.9                 -27.1 (h2load)    +105.8 (cpu)
+net-typed         730922     632794     784426         989.4                 -24.9 (h2load)    +591.3 (cpu)
+
+per-round ratio of req/s to asm (same round):
+  round  1: c 0.994  net-raw 1.052  net-typed 1.002
+  round  2: c 1.080  net-raw 1.070  net-typed 0.950
+  round  3: c 1.021  net-raw 1.012  net-typed 0.993
+  round  4: c 1.015  net-raw 1.003  net-typed 0.990
+  round  5: c 0.993  net-raw 0.993  net-typed 0.905
+  round  6: c 0.976  net-raw 0.920  net-typed 1.038
+  round  7: c 0.973  net-raw 1.013  net-typed 1.039
+  round  8: c 0.624  net-raw 0.847  net-typed 1.194
+  round  9: c 0.963  net-raw 0.952  net-typed 1.037
+  round 10: c 1.030  net-raw 1.057  net-typed 1.102
+  round 11: c 0.986  net-raw 0.979  net-typed 0.820
+  round 12: c 1.085  net-raw 1.106  net-typed 1.136

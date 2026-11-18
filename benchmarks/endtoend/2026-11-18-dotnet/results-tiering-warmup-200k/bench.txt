@@ -1,0 +1,39 @@
+server on vCPU 31 (1 worker, the whole process), h2load on 29,30; 8 rounds; 200000 warm-up + 400000 measured calls per run; variants: net-typed net-typed@DOTNET_TieredCompilation=0 net-raw net-raw@DOTNET_TieredCompilation=0
+round  1  net-typed        343161 req/s   1974.1 server-ns/call  server busy  24.5%
+round  1  net-typed@DOTNET_TieredCompilation=0     327896 req/s   1606.6 server-ns/call  server busy  51.8%
+round  1  net-raw          398561 req/s   1013.5 server-ns/call  server busy  39.6%
+round  1  net-raw@DOTNET_TieredCompilation=0     471313 req/s    799.6 server-ns/call  server busy  36.9%
+round  2  net-typed@DOTNET_TieredCompilation=0     438957 req/s   1227.8 server-ns/call  server busy  52.9%
+round  2  net-raw          494059 req/s    775.4 server-ns/call  server busy  37.5%
+round  2  net-raw@DOTNET_TieredCompilation=0     462528 req/s    761.6 server-ns/call  server busy  34.5%
+round  2  net-typed        480341 req/s   1458.5 server-ns/call  server busy  68.8%
+round  3  net-raw          273689 req/s   1660.8 server-ns/call  server busy  44.9%
+round  3  net-raw@DOTNET_TieredCompilation=0     298217 req/s   1550.3 server-ns/call  server busy  45.5%
+round  3  net-typed        490402 req/s   1647.3 server-ns/call  server busy  78.9%
+round  3  net-typed@DOTNET_TieredCompilation=0     471982 req/s   1270.9 server-ns/call  server busy  58.5%
+round  4  net-raw@DOTNET_TieredCompilation=0     583524 req/s    729.9 server-ns/call  server busy  41.6%
+round  4  net-typed        606539 req/s   1326.4 server-ns/call  server busy  78.5%
+round  4  net-typed@DOTNET_TieredCompilation=0     569983 req/s    963.6 server-ns/call  server busy  53.5%
+round  4  net-raw          698272 req/s    583.4 server-ns/call  server busy  39.7%
+round  5  net-typed        639407 req/s   1252.6 server-ns/call  server busy  77.8%
+round  5  net-typed@DOTNET_TieredCompilation=0     655719 req/s    891.7 server-ns/call  server busy  56.9%
+round  5  net-raw          652107 req/s    608.8 server-ns/call  server busy  38.7%
+round  5  net-raw@DOTNET_TieredCompilation=0     683248 req/s    540.4 server-ns/call  server busy  35.9%
+round  6  net-typed@DOTNET_TieredCompilation=0     731661 req/s    753.2 server-ns/call  server busy  53.7%
+round  6  net-raw          691463 req/s    609.1 server-ns/call  server busy   9.2%
+round  6  net-raw@DOTNET_TieredCompilation=0     648617 req/s    645.7 server-ns/call  server busy  40.9%
+round  6  net-typed        700172 req/s   1082.1 server-ns/call  server busy  73.8%
+round  7  net-raw          769278 req/s    461.7 server-ns/call  server busy  34.5%
+round  7  net-raw@DOTNET_TieredCompilation=0     676551 req/s    565.7 server-ns/call  server busy  37.3%
+round  7  net-typed        655609 req/s   1181.8 server-ns/call  server busy  75.4%
+round  7  net-typed@DOTNET_TieredCompilation=0     685870 req/s    830.3 server-ns/call  server busy  55.5%
+round  8  net-raw@DOTNET_TieredCompilation=0     697972 req/s    545.9 server-ns/call  server busy  37.2%
+round  8  net-typed        700138 req/s   1053.0 server-ns/call  server busy  71.4%
+round  8  net-typed@DOTNET_TieredCompilation=0     740416 req/s    738.6 server-ns/call  server busy  53.2%
+round  8  net-raw          719622 req/s    551.3 server-ns/call  server busy  38.6%
+
+variant                            median req/s        min        max   server-ns/call paired extra ns/call [range]
+net-typed                                622973     343161     700172           1289.5         +0.0 [+0.0 .. +0.0]
+net-typed@DOTNET_TieredCompilation=0       612851     327896     740416            927.7       -356.2 [-376.4 .. -230.7]
+net-raw                                  671785     273689     769278            609.0       -663.5 [-960.6 .. +13.5]
+net-raw@DOTNET_TieredCompilation=0       616070     298217     697972            687.8       -606.3 [-1174.5 .. -97.0]

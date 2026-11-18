@@ -24,12 +24,18 @@
 #      NASM client sample against the Greeter. tests/nasmapi.sh calls the
 #      code grpcasm.inc generates (milestone C3) directly: the route table,
 #      the dispatch in all three shapes, the health check, the default hooks.
-#   5. tests/Greeter.Interop: grpc-dotnet against the Greeter in
+#   5. The .NET API (milestone C4): tests/GrpcAsm.Net.Tests runs natively on
+#      this runner (GrpcAsmServer's handlers called by grpc-dotnet,
+#      GrpcAsmClient against that server and against Kestrel, the protobuf
+#      helper), with Linux REQUIRED so nothing is skipped. Then
+#      tests/greeter_net.sh publishes samples/GreeterNet self-contained and
+#      runs the Greeter's suite on it, once per handler (typed and raw).
+#   6. tests/Greeter.Interop: grpc-dotnet against the Greeter in
 #      debian:bookworm-slim, and the NASM client (samples/GreeterClient)
 #      against a grpc-dotnet server (Kestrel in the test process, reached
 #      through Testcontainers' host port forwarding), with Docker REQUIRED, so
 #      a missing Docker fails the job instead of silently skipping the tests.
-#   6. tests/kvsuite.sh: KvAsm's whole end-to-end suite against
+#   7. tests/kvsuite.sh: KvAsm's whole end-to-end suite against
 #      samples/KvServer (protocol, streaming, shutdown, idle timeouts,
 #      snapshots, refusals, h2spec, the fuzzer and its exact-answer matrix).
 #
@@ -114,6 +120,17 @@ jobs:
 
       - name: The NASM API's generated code — jump table, compare chain, aliases
         run: bash tests/nasmapi.sh
+
+      # libgrpcasm.so is next to the test assembly (GrpcAsm.Net's reference to
+      # GrpcAsm.Native copies it); GRPCASM_REQUIRE_LINUX turns a library that
+      # cannot load into a failure instead of skipped tests.
+      - name: GrpcAsm.Net — the .NET API over libgrpcasm.so
+        env:
+          GRPCASM_REQUIRE_LINUX: "1"
+        run: dotnet test --project tests/GrpcAsm.Net.Tests/GrpcAsm.Net.Tests.csproj -c Release --no-build
+
+      - name: The .NET Greeter — the same suite, typed and raw handlers
+        run: bash tests/greeter_net.sh
 
       # global.json selects the Microsoft.Testing.Platform runner, which
       # `dotnet test --project` needs.
