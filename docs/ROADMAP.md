@@ -112,7 +112,8 @@ matrix, CI, and the engine's own configuration struct (below).
 - `samples/KvServer/KvServer.asmproj` is the rest of KvAsm (store, cuckoo
   table, snapshot, `grpc.asm`, configuration, `main`). It links the engine
   through a ProjectReference.
-- Both build from the published AsmFoundation.Sdk 0.1.0.
+- Both build from the published AsmFoundation.Sdk 0.1.0 (0.2.0 since
+  2026-11-18: see "Building GrpcAsm with AsmSdk").
 - **Verified:** `tests/kvsuite.sh` runs KvAsm's whole end-to-end suite
   against the split binary and every phase passes (h2spec 146/146, the
   500-conversation matrix exact, 3,000 fuzzed connections). That is the gate
