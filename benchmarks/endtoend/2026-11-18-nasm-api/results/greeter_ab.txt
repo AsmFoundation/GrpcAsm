@@ -1,0 +1,11 @@
+server on vCPU 31 (1 worker), h2load on 29,30; 8 rounds
+round 1: before 747106, after 773276 req/s, ratio 1.035
+round 2: before 725496, after 746011 req/s, ratio 1.028
+round 3: before 782638, after 675615 req/s, ratio 0.863
+round 4: before 757702, after 782001 req/s, ratio 1.032
+round 5: before 756598, after 723994 req/s, ratio 0.957
+round 6: before 744566, after 768861 req/s, ratio 1.033
+round 7: before 766779, after 754805 req/s, ratio 0.984
+round 8: before 744509, after 662077 req/s, ratio 0.889
+before median     747106 req/s   min     725496   max     782638   (8 rounds)
+after  median     746011 req/s   min     662077   max     782001   (8 rounds)

@@ -6,20 +6,25 @@
 ; protocol hardening, buffers request bodies within their budgets, validates
 ; every call (405/415, routing, size, the 5-byte framing and the compression
 ; rules), answers the health service and frees every stream. It reaches this
-; module through the application hooks (include/grpcasm_hooks.inc):
-;   ga_app_unary           a validated Get, Put, Delete or Download: decode
-;                          the protobuf; Get, Put and Delete join the
+; module through the application hooks (include/grpcasm_hooks.inc). Since
+; milestone C3 the service is declared with the NASM API (grpcasm.inc,
+; GA_SERVICE below), which generates the route table, the dispatch and the
+; health check; this module writes the methods and its own hooks:
+;   kv_get, kv_put,        a validated Get / Delete, Put or Download (the
+;   kv_download            generated ga_app_unary jumps to them): decode the
+;                          protobuf; Get, Put and Delete join the
 ;                          connection's batch (a Put's record is allocated
 ;                          and filled here); a Download starts here
 ;   ga_app_batch_end       execute and answer the Gets, Puts and Deletes one
 ;                          read queued, as one software-pipelined batch: the
 ;                          writes under one hold of the writer mutex
 ;                          (ADR 0011), then every answer in arrival order
-;   ga_app_stream_data     an Upload's DATA, as it arrives
-;   ga_app_stream_end      an Upload's END_STREAM: verify, publish, answer
+;   kv_upload_data         an Upload's DATA, as it arrives (ga_app_stream_data)
+;   kv_upload_end          an Upload's END_STREAM: verify, publish, answer
+;                          (ga_app_stream_end)
 ;   ga_app_stream_fill     the next bytes of a Download's response
 ;   ga_app_call_release    free a call's unpublished record or transfer
-;   ga_app_health_service  the health service's "kvasm.v1.KvAsm"
+;   (generated)            the health service's "kvasm.v1.KvAsm"
 ;
 ; Routes: /kvasm.v1.KvAsm/{Get,Put,Delete,Upload,Download}
 ; (proto/kvasm/v1/kvasm.proto) and the engine's /grpc.health.v1.Health/Check
@@ -68,6 +73,7 @@ bits 64
 %include "server.inc"
 %include "pbstream.inc"
 %include "grpcasm_reply.inc"            ; CSTR, NV, TRAILERS_ONLY and the GRPC_* codes
+%include "grpcasm.inc"                  ; GA_SERVICE: the route table, dispatch and health check
 ; Most writes one hold of the writer mutex applies (batch_apply_writes). A
 ; 256 KiB read can carry ~1,500 Puts; applying them all in one hold would make
 ; every other worker's writes wait for it. 64 warm index updates hold the
@@ -226,7 +232,7 @@ extern ga_pool_realloc
 extern ga_pool_malloc
 extern ga_pool_calloc
 extern memcpy
-extern ga_keyeq
+; ga_keyeq, ga_h2n_reply_parts, ga_grpc_refuse, ga_pb_field_bytes: declared by grpcasm.inc
 extern kv_store_hash
 extern kv_store_get
 extern kv_store_write_begin
@@ -253,7 +259,6 @@ extern kv_pb_write_varint
 extern kv_pb_varint_len
 extern kv_crc32c_copy
 extern kv_crc32c_copy_nt
-extern ga_h2n_reply_parts
 extern ga_h2n_reply_static
 extern ga_h2n_reply_headers
 extern ga_h2n_reply_stream
@@ -311,9 +316,6 @@ CSTR s_m_upcrc,     "crc32c mismatch: nothing was stored"
 CSTR s_m_upflag,    "invalid gRPC message prefix"
 
 CSTR v_identity,    "identity"
-; The one service name the engine's health check reports on besides "" (the
-; whole server): ga_app_health_service answers for it.
-CSTR v_service,     "kvasm.v1.KvAsm"
 
 ; HdrField arrays carry absolute string pointers: PIE-legal only through
 ; load-time relocations, hence .data.rel.ro (relocated, then read-only via
@@ -349,15 +351,28 @@ TRAILERS_ONLY nv_e_upcrc2,    s_c3,  s_m_upcrc2
 TRAILERS_ONLY nv_e_upcrc,     s_c15, s_m_upcrc
 TRAILERS_ONLY nv_e_upflag,    s_c13, s_m_upflag
 
+; The service (grpcasm.inc). The route numbers are kvasm.inc's M_*, which the
+; batch compares Stream.method with. GA_APP_END generates the route table
+; (until milestone C3, routes.asm), ga_app_unary (a compare chain, Get first:
+; the hottest), ga_app_stream_data / ga_app_stream_end (Upload's two
+; handlers, by alias) and ga_app_health_service ("kvasm.v1.KvAsm"). The
+; hooks named in GA_USES_HOOK are this server's own: here and in hooks.asm.
+GA_SERVICE "kvasm.v1.KvAsm"
+    GA_UNARY         "Get",      kv_get,      M_GET
+    GA_UNARY         "Put",      kv_put,      M_PUT
+    GA_UNARY         "Delete",   kv_get,      M_DELETE
+    GA_CLIENT_STREAM "Upload",   kv_upload_data, kv_upload_end, M_UPLOAD
+    GA_UNARY         "Download", kv_download, M_DOWNLOAD
+GA_SERVICE_END
+GA_USES_HOOK batch_end, call_release, stream_fill
+GA_USES_HOOK worker_init, worker_fini, worker_resume, worker_pause, worker_tick
+GA_APP_END
+
 section .text
 
-global ga_app_unary:function
-global ga_app_stream_data:function
-global ga_app_stream_end:function
 global ga_app_stream_fill:function
 global ga_app_batch_end:function
 global ga_app_call_release:function
-global ga_app_health_service:function
 
 ; =============================================================================
 ; ga_app_call_release — release a call's unpublished record or transfer.
@@ -400,34 +415,18 @@ ga_app_call_release:
     ret
 
 ; =============================================================================
-; ga_app_health_service — whether this server serves a named service.
-; @param  rdi  the service name   @param rsi  its length (> 0)
-; @returns eax != 0 for "kvasm.v1.KvAsm", 0 for any other name (the engine
-;          answers NOT_FOUND).
-; @remarks Called by the engine's health check (grpc.health.v1.Health/Check)
-;          for a non-empty service name. A tail call into ga_keyeq once the
-;          lengths agree.
-; =============================================================================
-ga_app_health_service:
-    cmp     rsi, v_service_len
-    jne     .unknown
-    lea     rsi, [v_service]
-    mov     edx, v_service_len
-    jmp     ga_keyeq wrt ..plt          ; (name, "kvasm.v1.KvAsm", length)
-.unknown:
-    xor     eax, eax
-    ret
-
-; =============================================================================
-; ga_app_unary — run a validated unary call: Get, Put, Delete or Download.
+; The unary methods (GA_UNARY above): kv_get (Get and Delete), kv_put and
+; kv_download, each the engine's ga_app_unary for its routes through the
+; dispatch grpcasm.inc generates (a compare chain on the route byte, Get
+; first).
 ;
-; @param  rdi  Conn*   @param rsi  Stream* (route M_GET, M_PUT, M_DELETE or
-;              M_DOWNLOAD; already counted and marked ST_RESPONDED)
+; @param  rdi  Conn*   @param rsi  Stream* (already counted and marked
+;              ST_RESPONDED)
 ; @param  rdx  the request message (protobuf, after the 5-byte prefix)
 ; @param  rcx  its length
 ; @returns eax = 0, or -1 when the answer could not be queued (out of
 ;          memory in h2n's output buffer: the engine ends the connection).
-; @remarks The engine's ga_grpc_dispatch tail-calls this hook once the
+; @remarks The engine's ga_grpc_dispatch tail-calls the dispatch once the
 ;          method, content-type, route, size limit, message framing and
 ;          compression rules have passed — KvAsm's order, unchanged. What is
 ;          left is this server's: the protobuf payload and its field limits.
@@ -439,17 +438,27 @@ ga_app_health_service:
 ;          the worker's read buffer (ST_BORROWED), which stays valid until
 ;          the batch has run. A Download is a unary request whose response
 ;          is generated (download_start).
+;          Why three entries (milestone C3): until then one ga_app_unary
+;          served all four methods and tested the route twice on every call
+;          (Download first, then Put). Each entry now knows its method: a Get
+;          runs decode, hash and defer with no route test at all; a Put adds
+;          its record; Delete shares the Get path (its difference is the
+;          batch's, by Stream.method). The three share one frame layout and
+;          the error exits below (kv_get.e_*, kv_get.submitted).
 ; =============================================================================
-ga_app_unary:
+
+; KV_UNARY_ENTRY — the frame every unary entry builds: [0..40) PbKv, [40] h1,
+; [48] h2, [56..104) PbDl (Download); 6 pushes + 104: rsp 16-aligned for
+; calls. Leaves r12 = Conn*, rbx = Stream*, r13 = Config*, r14 = the store,
+; rdi / rsi = the message and its length.
+%macro KV_UNARY_ENTRY 0
     push    rbx
     push    rbp
     push    r12
     push    r13
     push    r14
     push    r15
-    sub     rsp, 104                    ; [0..40) PbKv, [40] h1, [48] h2,
-                                        ; [56..104) PbDl (Download);
-                                        ; 6 pushes + 104: rsp 16-aligned for calls
+    sub     rsp, 104
     mov     r12, rdi                    ; Conn*
     mov     rbx, rsi                    ; Stream*
     mov     rax, [r12 + Conn.worker]
@@ -457,64 +466,34 @@ ga_app_unary:
     mov     r14, [rax + Worker.app]
     mov     rdi, rdx                    ; the message
     mov     rsi, rcx                    ; its length
-    cmp     qword [rbx + Stream.method], M_DOWNLOAD
-    je      .download
+%endmacro
+
+; KV_DECODE_HASH — decode a key request (Get, Put, Delete) into the frame's
+; PbKv, check the key, and hash it into [rsp + 40] / [rsp + 48]. Refusals
+; leave through kv_get's error exits.
+%macro KV_DECODE_HASH 0
     lea     rdx, [rsp]
     call    kv_pb_decode_kv wrt ..plt
     test    rax, rax
-    jnz     .e_malformed
+    jnz     kv_get.e_malformed
     cmp     dword [rsp + PbKv.has_key], 0
-    je      .e_key
+    je      kv_get.e_key
     mov     rax, [rsp + PbKv.key_len]
     test    rax, rax
-    jz      .e_key
+    jz      kv_get.e_key
     cmp     rax, [r13 + Config.max_key]
-    ja      .e_key
-
+    ja      kv_get.e_key
     mov     rdi, r14
     mov     rsi, [rsp + PbKv.key]
     mov     rdx, [rsp + PbKv.key_len]
     lea     rcx, [rsp + 40]
     call    kv_store_hash wrt ..plt
+%endmacro
 
-    cmp     qword [rbx + Stream.method], M_PUT
-    jne     .defer                      ; Get, Delete: nothing to build first
-
-    ; ---- Put: build the record now; the batch publishes it (ADR 0011) ----
-    ; Allocation (with its memory reservation) and both copies happen here,
-    ; outside the writer mutex, while the value is still hot from parsing.
-    ; The record usually comes from this worker's own record cache — records
-    ; its reclamation freed — so no glibc arena lock is shared with the
-    ; worker that will free it.
-    ; Refusals that need no index (value too large, memory limit) are
-    ; answered at once; a full store (-ENOSPC) is only known when the batch
-    ; publishes. From here until it is published the record belongs to the
-    ; Stream (ST_APP_STATE): ga_app_call_release returns it if the stream or
-    ; connection dies first.
-    mov     rax, [rsp + PbKv.value_len]
-    cmp     rax, [r13 + Config.max_value]
-    ja      .e_value
-    mov     r8, rax                     ; value length
-    mov     rdi, r14
-    mov     rax, [r12 + Conn.worker]
-    mov     esi, [rax + Worker.id]      ; this worker's slot: its record cache
-    mov     rdx, [rsp + PbKv.key]
-    mov     rcx, [rsp + PbKv.key_len]
-    call    kv_store_rec_alloc_local wrt ..plt  ; header + key written
-    cmp     rax, -ENOMEM
-    je      .e_memory
-    test    rax, rax
-    js      .e_value                    ; -E2BIG
-    mov     [rbx + Stream.app + KvCall.wrec], rax
-    or      qword [rbx + Stream.flags], ST_APP_STATE ; until published
-    mov     rcx, [rsp + PbKv.key_len]
-    add     rcx, 7
-    and     rcx, -8                     ; the value follows the key padded to 8
-    lea     rdi, [rax + Rec.data + rcx]
-    mov     rsi, [rsp + PbKv.value]
-    mov     rdx, [rsp + PbKv.value_len]
-    call    memcpy wrt ..plt            ; (an empty value copies nothing)
-
+kv_get:                                 ; Get and Delete
+    KV_UNARY_ENTRY
+    KV_DECODE_HASH
+    ; Get, Delete: nothing to build first.
     ; ---- Get, Put, Delete: deferred into the connection's batch ----
     ; The store operation itself runs in ga_app_batch_end once the whole
     ; read is parsed. Here: remember the key (it points into req_buf, which
@@ -611,6 +590,52 @@ ga_app_unary:
     pop     rbp
     pop     rbx
     ret
+
+; kv_put — Put: decode, hash, build the record, then kv_get's deferral.
+kv_put:
+    KV_UNARY_ENTRY
+    KV_DECODE_HASH
+    ; ---- Put: build the record now; the batch publishes it (ADR 0011) ----
+    ; Allocation (with its memory reservation) and both copies happen here,
+    ; outside the writer mutex, while the value is still hot from parsing.
+    ; The record usually comes from this worker's own record cache — records
+    ; its reclamation freed — so no glibc arena lock is shared with the
+    ; worker that will free it.
+    ; Refusals that need no index (value too large, memory limit) are
+    ; answered at once; a full store (-ENOSPC) is only known when the batch
+    ; publishes. From here until it is published the record belongs to the
+    ; Stream (ST_APP_STATE): ga_app_call_release returns it if the stream or
+    ; connection dies first.
+    mov     rax, [rsp + PbKv.value_len]
+    cmp     rax, [r13 + Config.max_value]
+    ja      kv_get.e_value
+    mov     r8, rax                     ; value length
+    mov     rdi, r14
+    mov     rax, [r12 + Conn.worker]
+    mov     esi, [rax + Worker.id]      ; this worker's slot: its record cache
+    mov     rdx, [rsp + PbKv.key]
+    mov     rcx, [rsp + PbKv.key_len]
+    call    kv_store_rec_alloc_local wrt ..plt  ; header + key written
+    cmp     rax, -ENOMEM
+    je      kv_get.e_memory
+    test    rax, rax
+    js      kv_get.e_value                    ; -E2BIG
+    mov     [rbx + Stream.app + KvCall.wrec], rax
+    or      qword [rbx + Stream.flags], ST_APP_STATE ; until published
+    mov     rcx, [rsp + PbKv.key_len]
+    add     rcx, 7
+    and     rcx, -8                     ; the value follows the key padded to 8
+    lea     rdi, [rax + Rec.data + rcx]
+    mov     rsi, [rsp + PbKv.value]
+    mov     rdx, [rsp + PbKv.value_len]
+    call    memcpy wrt ..plt            ; (an empty value copies nothing)
+    jmp     kv_get.defer
+
+; kv_download — Download: decode its request, then download_start (kv_get's
+; exits).
+kv_download:
+    KV_UNARY_ENTRY
+    jmp     kv_get.download
 
 ; =============================================================================
 ; ga_app_batch_end — execute and answer every Get, Put and Delete queued
@@ -860,7 +885,7 @@ write_reply:
 .out:
     test    eax, eax
     jz      .ret
-    mov     eax, -1                     ; normalize, as ga_app_unary does
+    mov     eax, -1                     ; normalize, as the unary entries do
 .ret:
     add     rsp, 16
     pop     r13
@@ -1132,7 +1157,8 @@ upload_refuse:
     jmp     refuse                      ; tail call: rdi, rsi kept, ecx = count
 
 ; =============================================================================
-; ga_app_stream_data — take the next DATA payload of an Upload call.
+; kv_upload_data — take the next DATA payload of an Upload call
+; (ga_app_stream_data, by alias: Upload is the one client-streaming method).
 ;
 ; @param  rdi  Conn*   @param rsi  Stream* (route M_UPLOAD)
 ; @param  rdx  data    @param rcx  length (> 0)
@@ -1151,7 +1177,7 @@ upload_refuse:
 ;          with the stream. Data after an early answer is dropped by the
 ;          engine before it gets here.
 ; =============================================================================
-ga_app_stream_data:
+kv_upload_data:
     push    rbx
     push    rbp
     push    r12
@@ -1506,7 +1532,7 @@ ensure_record:
     ret
 
 ; =============================================================================
-; upload_finish (exported as ga_app_stream_end) — the peer ended an Upload:
+; kv_upload_end (ga_app_stream_end, by alias) — the peer ended an Upload:
 ; verify, publish, answer. The engine's ga_grpc_dispatch tail-calls it at
 ; END_STREAM, after the method, content-type and route checks.
 ; @param  rdi  Conn*   @param rsi  Stream*
@@ -1521,7 +1547,7 @@ ensure_record:
 ;          Answer: UploadResponse{created, crc32c} — the checksum of what was
 ;          stored, so a client that sent none can still verify.
 ; =============================================================================
-ga_app_stream_end:
+kv_upload_end:
 upload_finish:
     push    rbx
     push    rbp

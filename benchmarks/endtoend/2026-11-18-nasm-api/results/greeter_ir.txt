@@ -1,0 +1,2 @@
+before 14654214 instructions at 20000 requests, 86978470 at 120000: 723.2 per request
+after  14192808 instructions at 20000 requests, 84219186 at 120000: 700.3 per request

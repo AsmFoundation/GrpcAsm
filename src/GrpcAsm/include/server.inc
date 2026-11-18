@@ -274,6 +274,15 @@ endstruc
 ; when it attaches such state, and may clear it once nothing is left (a
 ; published Put), which puts the stream back on stream_free's one-call path.
 %define ST_APP_STATE        1024
+; A reply is being written in place (ga_h2n_reply_begin, the fast case): the
+; response's HEADERS, DATA header and gRPC prefix sit in Conn.out_buf from
+; offset Stream.resp_off, and the application is writing the message after
+; them. ga_h2n_reply_end patches the lengths and appends the trailers.
+%define ST_REPLY_INPLACE    2048
+; A reply is being written into Stream.resp_buf instead (ga_h2n_reply_begin,
+; the fallback: windows, output room or the encoder's state did not allow the
+; in-place template). ga_h2n_reply_end frames it like ga_h2n_reply_buf.
+%define ST_REPLY_BUFFERED   4096
 ; Stream.method holds the call's route byte (grpcasm_routes.inc): one of the
 ; application's methods from its ga_app_routes table, GA_ROUTE_UNKNOWN or
 ; GA_ROUTE_HEALTH; GA_ROUTE_CLIENT_STREAM marks a client-streaming method.

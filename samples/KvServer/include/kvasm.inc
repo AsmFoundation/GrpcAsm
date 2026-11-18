@@ -13,7 +13,7 @@
 %include "grpcasm_sys.inc"         ; syscalls, errno, mmap (GrpcAsm engine)
 %include "grpcasm_routes.inc"      ; GA_ROUTE_* (GrpcAsm engine)
 
-; ---- routes: this server's methods (Stream.method), listed in routes.asm ------
+; ---- routes: this server's methods (Stream.method), declared in grpc.asm -------
 ; The numbers are this server's own (1..GA_ROUTE_MAX, grpcasm_routes.inc); 4
 ; was the health check's, which the engine now answers itself.
 %define M_GET               1

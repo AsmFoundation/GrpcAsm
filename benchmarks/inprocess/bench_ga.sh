@@ -68,7 +68,10 @@ for v in "${VARIANTS[@]}"; do
        -o "$W/benchabi-$v.o" "$W/benchabi_ga.asm"
   objcopy --globalize-symbol=h2_process --globalize-symbol=conn_window_refill "$E/h2n.o" "$W/h2n_g-$v.o"
   # The engine and KvServer each have a grpc.o (from step 4): list both by path.
-  OBJS="$(ls "$E"/*.o | grep -v -E '/h2n\.o$') $(ls "$A"/*.o | grep -v -E '/main\.o$')"
+  # routes_default.o (milestone D) is the archive's fallback route table for
+  # programs without one; linked here as a plain object it would clash with
+  # KvServer's own ga_app_routes, so it is left out like h2n.o.
+  OBJS="$(ls "$E"/*.o | grep -v -E '/(h2n|routes_default)\.o$') $(ls "$A"/*.o | grep -v -E '/main\.o$')"
   gcc -std=c11 -O2 -g -Wall -Wextra -I /kvasm/server/tests -o "$W/bench-$v" "$W/bench_h2_ga.c" \
       "$W/benchabi-$v.o" "$W/calib.o" "$W/h2n_g-$v.o" $OBJS -pthread
 done

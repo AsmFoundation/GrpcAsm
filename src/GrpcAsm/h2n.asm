@@ -202,6 +202,9 @@ global ga_h2n_reply_buf
 global ga_h2n_reply_static
 global ga_h2n_reply_headers
 global ga_h2n_reply_stream
+global ga_h2n_reply_begin
+global ga_h2n_reply_end
+global ga_h2n_reply_abandon
 
 ; =============================================================================
 ; ga_h2n_open — set up HTTP/2 on an accepted connection.
@@ -2785,6 +2788,202 @@ ga_h2n_reply_stream:
     call    stream_close
     add     rsp, 8
     xor     eax, eax
+    ret
+
+; =============================================================================
+; ga_h2n_reply_begin — start a reply whose message the application writes in
+; place (milestone C3; grpcasm.inc's GA_REPLY_BEGIN).
+;
+; @param  rdi  Conn*   @param rsi  Stream* (a call not answered yet)
+; @param  rdx  the most bytes the message (protobuf, without the gRPC
+;              prefix) will take
+; @returns rax = where to write the message, or 0 when out of memory (nothing
+;          is reserved: answer the call another way, or return -1 to end the
+;          connection).
+; @remarks Two cases, chosen here so the application never has to know:
+;          * In place: the reply fits the steady-state template of reply_fast
+;            (encoder H2E_BOTH, no pending table size update, 5 + max within
+;            both send windows and one frame, room below OUT_HIGH_WATER or an
+;            empty buffer). The template's frame skeleton (HEADERS 88 BF, the
+;            DATA header, the gRPC prefix) is reserved in Conn.out_buf, and
+;            the pointer returned lies right after the prefix: the message is
+;            written once, where the socket reads it. Nothing is copied.
+;          * Buffered: a pool block of 5 + max in Stream.resp_buf; the end
+;            frames it as ga_h2n_reply_buf does (one copy now, or queued while
+;            the windows are closed).
+;          Footgun: between begin and end the application must not write to
+;          the connection's output in any other way — no other reply, no
+;          ga_grpc_refuse — because the reservation is the end of the
+;          buffer. To answer differently after all, call
+;          ga_h2n_reply_abandon first.
+; =============================================================================
+ga_h2n_reply_begin:
+    push    rbx
+    push    rbp
+    push    r12
+    sub     rsp, 16                     ; 3 pushes + 16: aligned for calls
+    mov     rbx, rdi
+    mov     rbp, rsi
+    lea     r12, [rdx + GRPC_PREFIX]    ; the DATA payload: prefix + message
+    test    qword [rbx + Conn.h2 + H2.flags], H2F_CLOSING
+    jnz     .buffered                   ; (ga_h2n_reply_end then drops the call)
+    cmp     qword [rbx + Conn.h2 + H2.enc], H2E_BOTH
+    jne     .buffered                   ; the response fields are not indexed yet
+    test    qword [rbx + Conn.h2 + H2.flags], H2F_TSU
+    jnz     .buffered
+    cmp     r12, [rbx + Conn.h2 + H2.send_window]
+    jg      .buffered
+    cmp     r12, [rbp + Stream.send_window]
+    jg      .buffered
+    cmp     r12, [rbx + Conn.h2 + H2.peer_frame]
+    ja      .buffered
+    ; Room: below the high-water mark after this reply, or an empty buffer
+    ; (reply_fast's rule, so the buffer never grows past the mark plus one
+    ; reply). Queued output is offered to the socket first.
+    mov     rax, [rbx + Conn.out_len]
+    test    rax, rax
+    jz      .reserve
+    add     rax, r12
+    cmp     rax, OUT_HIGH_WATER
+    jbe     .reserve
+    mov     rdi, rbx
+    call    out_try_drain
+    test    eax, eax
+    jnz     .buffered                   ; the socket is full: no room in place
+.reserve:
+    ; HEADERS (11) + DATA header (9) + payload + trailers (10).
+    lea     rsi, [r12 + 2 * FRAME_HDR + 12]
+    mov     rdi, rbx
+    call    out_reserve
+    test    rax, rax
+    jz      .nomem
+    mov     ecx, [rbp + Stream.id]
+    bswap   ecx                         ; the stream id as the wire has it
+    mov     dword [rax], 0x01020000     ; HEADERS: length 2
+    mov     byte [rax + 4], FF_END_HEADERS
+    mov     [rax + 5], ecx
+    mov     word [rax + 9], 0xBF88      ; :status 200, [63] content-type
+    mov     dword [rax + 11], 0         ; DATA: length patched by the end, type 0
+    mov     byte [rax + 15], 0
+    mov     [rax + 16], ecx
+    mov     byte [rax + 2 * FRAME_HDR + 2], 0 ; gRPC prefix: not compressed
+    mov     rcx, rax
+    sub     rcx, [rbx + Conn.out_buf]
+    mov     [rbp + Stream.resp_off], rcx ; an offset: the buffer may move later
+    or      qword [rbp + Stream.flags], ST_REPLY_INPLACE
+    add     rax, 2 * FRAME_HDR + 2 + GRPC_PREFIX ; the message area
+    jmp     .out
+.buffered:
+    mov     rdi, r12
+    mov     rsi, [rbx + Conn.worker]
+    lea     rsi, [rsi + Worker.pool]
+    call    ga_pool_malloc wrt ..plt
+    test    rax, rax
+    jz      .nomem
+    mov     [rbp + Stream.resp_buf], rax  ; freed with the stream
+    mov     [rbp + Stream.resp_len], r12
+    or      qword [rbp + Stream.flags], ST_REPLY_BUFFERED
+    add     rax, GRPC_PREFIX
+    jmp     .out
+.nomem:
+    xor     eax, eax
+.out:
+    add     rsp, 16
+    pop     r12
+    pop     rbp
+    pop     rbx
+    ret
+
+; =============================================================================
+; ga_h2n_reply_end — finish a reply begun with ga_h2n_reply_begin.
+;
+; @param  rdi  Conn*   @param rsi  Stream*
+; @param  rdx  the message's length (at most what begin was given)
+; @returns eax = 0 (the call is answered: the stream may be freed already),
+;          or -1 (out of memory, or no reply was begun: the engine ends the
+;          connection).
+; @remarks In place: the DATA length and the gRPC prefix are patched, the
+;          trailers (BE: [62] grpc-status 0) follow the message, the
+;          reservation is trimmed to the real length, both windows are
+;          charged, and the stream completes (response_done) — reply_fast's
+;          steady state, without the copy. Buffered: the prefix is written in
+;          front of the message and the buffer is framed by ga_h2n_reply_buf
+;          (on a failing connection the call is dropped there).
+; =============================================================================
+ga_h2n_reply_end:
+    test    qword [rsi + Stream.flags], ST_REPLY_INPLACE
+    jz      .buffered
+    and     qword [rsi + Stream.flags], ~ST_REPLY_INPLACE
+    mov     rax, [rsi + Stream.resp_off]
+    add     rax, [rdi + Conn.out_buf]   ; the response's first byte
+    lea     rcx, [rdx + GRPC_PREFIX]    ; the DATA payload
+    mov     r8d, ecx
+    shl     r8d, 8
+    bswap   r8d                         ; length big-endian, then type DATA (0)
+    mov     [rax + FRAME_HDR + 2], r8d
+    mov     r8d, edx
+    bswap   r8d
+    mov     [rax + 2 * FRAME_HDR + 2 + 1], r8d ; the gRPC prefix's message length
+    lea     r9, [rax + 2 * FRAME_HDR + 2 + GRPC_PREFIX]
+    add     r9, rdx                     ; the trailers follow the message
+    mov     dword [r9], 0x01010000      ; HEADERS: length 1
+    mov     byte [r9 + 4], FF_END_HEADERS | FF_END_STREAM
+    mov     r8d, [rax + 5]              ; the stream id, as begin wrote it
+    mov     [r9 + 5], r8d
+    mov     byte [r9 + 9], 0xBE         ; [62] grpc-status: 0
+    add     r9, FRAME_HDR + 1
+    sub     r9, [rdi + Conn.out_buf]
+    mov     [rdi + Conn.out_len], r9    ; trim the reservation
+    sub     [rdi + Conn.h2 + H2.send_window], rcx
+    sub     [rsi + Stream.send_window], rcx
+    jmp     response_done               ; tail call: 0, or -1 (out of memory for an RST)
+.buffered:
+    test    qword [rsi + Stream.flags], ST_REPLY_BUFFERED
+    jz      .no_begin
+    and     qword [rsi + Stream.flags], ~ST_REPLY_BUFFERED
+    mov     rax, [rsi + Stream.resp_buf]
+    mov     byte [rax], 0
+    mov     ecx, edx
+    bswap   ecx
+    mov     [rax + 1], ecx
+    lea     rcx, [rdx + GRPC_PREFIX]
+    mov     [rsi + Stream.resp_len], rcx
+    jmp     ga_h2n_reply_buf            ; tail call: framed now, queued, or dropped
+.no_begin:
+    mov     eax, -1                     ; a programming error: end the connection
+    ret
+
+; =============================================================================
+; ga_h2n_reply_abandon — undo ga_h2n_reply_begin.
+; @param  rdi  Conn*   @param rsi  Stream*
+; @returns nothing. The call is unanswered again: answer it any other way
+;          (ga_grpc_refuse, for an error found while writing the message).
+; @remarks In place, the reservation is the end of the output buffer (nothing
+;          else may write between begin and end), so cutting the buffer back
+;          to it removes it whole.
+; =============================================================================
+ga_h2n_reply_abandon:
+    test    qword [rsi + Stream.flags], ST_REPLY_INPLACE
+    jz      .buffered
+    and     qword [rsi + Stream.flags], ~ST_REPLY_INPLACE
+    mov     rax, [rsi + Stream.resp_off]
+    mov     [rdi + Conn.out_len], rax
+    ret
+.buffered:
+    test    qword [rsi + Stream.flags], ST_REPLY_BUFFERED
+    jz      .none
+    push    rbx                         ; 1 push: aligned for the call
+    mov     rbx, rsi
+    and     qword [rbx + Stream.flags], ~ST_REPLY_BUFFERED
+    mov     rsi, [rdi + Conn.worker]
+    lea     rsi, [rsi + Worker.pool]
+    mov     rdi, [rbx + Stream.resp_buf]
+    call    ga_pool_free wrt ..plt
+    xor     eax, eax
+    mov     [rbx + Stream.resp_buf], rax
+    mov     [rbx + Stream.resp_len], rax
+    pop     rbx
+.none:
     ret
 
 ; =============================================================================

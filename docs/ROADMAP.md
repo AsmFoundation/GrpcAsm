@@ -353,7 +353,7 @@ matrix, CI, and the engine's own configuration struct (below).
 
 ## Milestone C — the APIs
 
-**Status (2026-11-17): C1 and C2 are done. C3 is next.**
+**Status (2026-11-18): C1, C2 and C3 are done. C4 is next.**
 
 **The steps (planned 2026-11-17, after milestone B):**
 
@@ -423,11 +423,59 @@ matrix, CI, and the engine's own configuration struct (below).
   - **Measured** (`benchmarks/endtoend/2026-11-17-c-abi`, h2load, one worker):
     the assembly Greeter served a median of 755,153 calls/s and the C Greeter
     753,994, a difference of 0.15%.
-- **C3, the NASM API** (`grpcasm.inc`): the route macros below generate both
-  the table and the dispatch, so a route costs a direct jump instead of an
-  application's own comparisons. The reply macros write in place. KvServer
-  and the Greeter are ported to it, gated by their suites and the in-process
-  benchmark.
+- **C3, the NASM API (done).** `src/GrpcAsm/include/grpcasm.inc`:
+  - **Declaring a service:** `GA_SERVICE "pkg.Service"`, then `GA_UNARY
+    "Method", handler [, route]` and `GA_CLIENT_STREAM "Method", data, end
+    [, route]`, then `GA_SERVICE_END`. Hooks the application writes itself
+    are named in `GA_USES_HOOK`. Then `GA_APP_END`, once, in the handlers'
+    file.
+  - **What GA_APP_END generates:**
+    - the route table, with route numbers checked at assembly time
+      (duplicates fail the build);
+    - `ga_app_unary`, specialized to the number of unary methods: 1 is an
+      alias of the handler (`equ`), so the engine's call reaches it with no
+      instruction between; 2–4 is a compare chain on the route byte, in
+      declaration order, the last without a compare; 5 or more is a jump
+      table of 32-bit offsets in `.text`, with a trap for other routes;
+    - `ga_app_stream_data`/`_end` the same way, for client-streaming
+      methods;
+    - `ga_app_health_service` from the declared service names;
+    - the no-op version of every other hook.
+  - **Handlers** keep the hook's register contract (rdi Conn*, rsi Stream*,
+    rdx message, rcx length; eax 0 or -1), so the API imposes no stack frame.
+  - **Replies in place:** `GA_REPLY_BEGIN conn, stream, max` returns where
+    the message goes; `GA_REPLY_END conn, stream, length` frames it;
+    `GA_REPLY_ABANDON` undoes a begin. The engine side is
+    `ga_h2n_reply_begin`/`_end`/`_abandon` in h2n.asm.
+    - When reply_fast's steady-state template applies (both response fields
+      indexed, windows and room enough), the 30-byte frame skeleton is
+      reserved in the output buffer and the message is written inside it:
+      nothing is copied.
+    - Otherwise a pool buffer is used, framed by `ga_h2n_reply_buf`.
+  - **Ported:**
+    - `samples/Greeter`: four lines declare the service; SayHello replies in
+      place.
+    - `samples/KvServer`: the route table (`routes.asm`) and the health check
+      are generated. The one `ga_app_unary` that tested the route twice per
+      call became three entries (`kv_get` for Get and Delete, `kv_put`,
+      `kv_download`). Upload's handlers became the streaming hooks by alias.
+  - **Verified:**
+    - the Greeter: exact answers, h2spec 146/146, and the 12 grpc-dotnet
+      tests (up to 1 MiB messages, through the buffered path);
+    - KvServer: KvAsm's whole suite (h2spec 146/146, fuzzing, the exact
+      matrix);
+    - `tests/nasmapi.sh` calls the generated code directly for all three
+      dispatch shapes, including the jump table no sample uses. Every
+      route's handler, the traps, the streaming hooks, the health check, and
+      default versus application hooks are checked.
+  - **Measured:**
+    - **The Greeter, under callgrind:** 723.2 → 700.3 instructions per
+      SayHello (−3.2%; `benchmarks/endtoend/2026-11-18-nasm-api`). End to
+      end with h2load the two are indistinguishable (median 747,106 vs
+      746,011 req/s): 23 instructions are under 1% of the call.
+    - **KvServer, in process** (`benchmarks/inprocess/2026-11-18-c3`): GET
+      67.68 → 67.29 ns median and the health check 39.79 → 39.87, both
+      within noise, with byte-identical answers. The port costs nothing.
 - **C4, .NET** (`GrpcAsm.Net`, over the C ABI): `[UnmanagedCallersOnly]`
   handlers, typed handlers through Google.Protobuf, and raw handlers over
   spans. Whether handlers run inline on the event loop or on the thread pool

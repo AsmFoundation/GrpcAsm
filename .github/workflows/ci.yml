@@ -21,7 +21,9 @@
 #      tests/capi.sh checks every error code, the lifecycle and every call
 #      function of the ABI. tests/client.sh runs the client (milestone D)
 #      against the Greeter, capi_server and a scripted HTTP/2 server, and the
-#      NASM client sample against the Greeter.
+#      NASM client sample against the Greeter. tests/nasmapi.sh calls the
+#      code grpcasm.inc generates (milestone C3) directly: the route table,
+#      the dispatch in all three shapes, the health check, the default hooks.
 #   5. tests/Greeter.Interop: grpc-dotnet against the Greeter in
 #      debian:bookworm-slim, and the NASM client (samples/GreeterClient)
 #      against a grpc-dotnet server (Kestrel in the test process, reached
@@ -109,6 +111,9 @@ jobs:
 
       - name: The client — Greeter, capi_server, a scripted server, the NASM client
         run: bash tests/client.sh
+
+      - name: The NASM API's generated code — jump table, compare chain, aliases
+        run: bash tests/nasmapi.sh
 
       # global.json selects the Microsoft.Testing.Platform runner, which
       # `dotnet test --project` needs.

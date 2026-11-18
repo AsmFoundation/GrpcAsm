@@ -1,0 +1,6 @@
+kvasm get: 67.14 ns/request min = 204 cycles (cycle 0.3292 ns), 68.94 median, 75.23 p90; sid patch 1.39 ns; 2224 bytes out per batch; output digest ac0261a8a9d4f821; 672001 requests, server counted 672001; hash aes
+before get: 66.87 ns/request min = 201 cycles (cycle 0.3326 ns), 68.21 median, 70.90 p90; sid patch 1.39 ns; 2224 bytes out per batch; output digest ac0261a8a9d4f821; 672001 requests, server counted 672001; hash aes
+after get: 67.12 ns/request min = 204 cycles (cycle 0.3296 ns), 68.60 median, 73.35 p90; sid patch 1.39 ns; 2224 bytes out per batch; output digest ac0261a8a9d4f821; 672001 requests, server counted 672001; hash aes
+kvasm ping: 42.20 ns/request min = 128 cycles (cycle 0.3304 ns), 43.32 median, 53.40 p90; sid patch 1.22 ns; 592 bytes out per batch; output digest 230fab4af7318bff; 672001 requests, server counted 672001; hash aes
+before ping: 39.82 ns/request min = 121 cycles (cycle 0.3287 ns), 41.41 median, 43.77 p90; sid patch 1.16 ns; 592 bytes out per batch; output digest 230fab4af7318bff; 672001 requests, server counted 672001; hash aes
+after ping: 40.03 ns/request min = 121 cycles (cycle 0.3314 ns), 41.73 median, 45.35 p90; sid patch 1.23 ns; 592 bytes out per batch; output digest 230fab4af7318bff; 672001 requests, server counted 672001; hash aes
