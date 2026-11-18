@@ -499,15 +499,25 @@ matrix, CI, and the engine's own configuration struct (below).
 
 ## Risks and open questions
 
-- **LLVM size.** Official release archives are 0.7–1.9 GB per OS. Only `ld.lld`
-  and `llvm-ar` are extracted, but they are still large, statically linked
-  binaries. If the packages come out too big, build `lld` from source with only
-  the X86 target in the release workflow.
-- **Glibc-static executables** (KvAsm today) cannot link without a sysroot.
-  `AsmToolchain=System` keeps them building on Linux. A freestanding runtime is a
-  separate decision, and its allocator would have to be measured against glibc's.
+- **KvAsm's image on GrpcAsm (milestone F).**
+  - KvAsm 0.3.0 ships a static-glibc `FROM scratch` image. A KvServer built on
+    GrpcAsm links glibc dynamically (AsmSdk's `Libc` runtime).
+  - The image could carry glibc, at the cost of size. Or the server could be
+    linked statically, with `AsmToolchain=System` on Linux, which AsmSdk
+    documents for static glibc.
+  - Which one is decided by measuring size and startup. A freestanding runtime
+    would be a separate decision, and its allocator would have to be measured
+    against glibc's.
 - **Python handlers** run under the GIL. The transport stays in assembly, but
   handler throughput is Python's.
-- **The NuGet ID** `GrpcAsm` and the `AsmFoundation.*` prefix are free today (to
-  be checked again before the first push). Reserving the prefix on nuget.org is
-  worth doing.
+- **The NuGet ID** `GrpcAsm` was free on 2026-11-18 (nuget.org answers 404).
+  Check it again before the first push.
+  - The `AsmFoundation.*` prefix already carries AsmSdk's packages.
+  - Reserving it on nuget.org is an organization step for the owner, not
+    GrpcAsm's.
+- **AsmSdk's limits belong to AsmSdk.**
+  - Static-glibc links need a real sysroot; AsmSdk's README lists this under
+    "Limits".
+  - The size of its bundled toolchain packages is a concern for AsmSdk's
+    release workflow.
+  - GrpcAsm only consumes AsmSdk's released packages.
