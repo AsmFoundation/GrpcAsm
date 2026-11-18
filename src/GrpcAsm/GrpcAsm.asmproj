@@ -16,6 +16,14 @@
   -->
   <PropertyGroup>
     <OutputType>StaticLibrary</OutputType>
-    <AsmLibraryName>grpcasm</AsmLibraryName>
+    <!-- libc: the engine calls glibc (pthread_create, the allocator) through the PLT, so only a
+         libc program can link it, and NuGet refuses it to a freestanding project (NU1201)
+         instead of a link failing later. -->
+    <TargetFramework>libc</TargetFramework>
+    <AssemblyName>grpcasm</AssemblyName>
+    <!-- PackageId defaults to AssemblyName, as in .NET, and GrpcAsm.Native's is grpcasm too
+         (libgrpcasm.so): two projects of one restore graph with the same name are
+         "Ambiguous project name 'grpcasm'" to NuGet. The package is GrpcAsm (milestone E). -->
+    <PackageId>GrpcAsm</PackageId>
   </PropertyGroup>
 </Project>

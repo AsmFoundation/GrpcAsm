@@ -7,12 +7,12 @@
     tests/greeter runs h2spec and grpc-dotnet against.
 
     Settings come from the environment: GREETER_PORT (default 50051) and GREETER_WORKERS
-    (default 1). Runs on glibc (AsmRuntime=Libc), entered through AsmFoundation.Sdk's crt1.
+    (default 1). Runs on glibc (TargetFramework=libc), entered through AsmFoundation.Sdk's crt1.
   -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <AsmRuntime>Libc</AsmRuntime>
-    <AsmLibraryName>greeter</AsmLibraryName>
+    <TargetFramework>libc</TargetFramework>
+    <AssemblyName>greeter</AssemblyName>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/GrpcAsm/GrpcAsm.asmproj" />

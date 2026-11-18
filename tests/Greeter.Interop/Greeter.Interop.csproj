@@ -7,7 +7,7 @@
     Greeter needs 2.34+), started through Testcontainers with the freshly built binary copied in,
     so the tests always exercise this tree's engine. Build the solution first
     (dotnet build GrpcAsm.slnx -c Release): GreeterServer locates
-    samples/Greeter/bin/Release/greeter, or GREETER_BINARY when set.
+    samples/Greeter/bin/Release/libc/greeter, or GREETER_BINARY when set.
 
     The other direction too (ClientInteropTests): GrpcAsm's client, as the NASM sample
     samples/GreeterClient, calls a Greeter that ASP.NET Core (Kestrel, Grpc.AspNetCore) serves in

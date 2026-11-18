@@ -7,7 +7,7 @@
  * Build (Linux x86-64, glibc 2.34+):
  *   gcc -std=c11 -O2 -Wall -Wextra -Werror -I src/GrpcAsm.Native/include \
  *       -o greeter samples/GreeterC/greeter.c \
- *       -L src/GrpcAsm.Native/bin/Release -lgrpcasm -Wl,-rpath,'$ORIGIN'
+ *       -L src/GrpcAsm.Native/bin/Release/libc -lgrpcasm -Wl,-rpath,'$ORIGIN'
  *   (then put libgrpcasm.so next to the executable)
  *
  * Settings: GREETER_PORT (1..65535, default 50051) and GREETER_WORKERS (1..256, default 1),

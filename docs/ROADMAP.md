@@ -63,21 +63,30 @@ GrpcAsm relies on AsmSdk only as any consumer does. All of the following is
 documented AsmSdk behavior (AsmSdk's `docs/asmproj.md`), and none of it was
 built for GrpcAsm:
 
-- **The pin:** `global.json` pins `AsmFoundation.Sdk` 0.1.0 (`msbuild-sdks`).
+- **The pin:** `global.json` pins `AsmFoundation.Sdk` 0.2.0 (`msbuild-sdks`; 0.1.0 until
+  2026-11-18).
   Restore takes it from nuget.org, together with the toolchain package for the
   build machine. Nothing else is installed, and Windows, Linux and macOS all
   build the same Linux x86-64 ELF.
-- **Project types:**
+- **Project types,** with .NET's own property names since AsmSdk 0.2.0:
   - `OutputType` `StaticLibrary` for the engine (`libgrpcasm.a`);
-  - `Exe` with `AsmRuntime=Libc` for KvServer and the Greeter;
-  - `Library` for `libgrpcasm.so`.
+  - `Exe` for KvServer, the Greeter and the client sample;
+  - `Library` for `libgrpcasm.so`;
+  - `TargetFramework` `libc` for every project, the engine included: it calls glibc
+    (`pthread_create`, the allocator), so NuGet refuses it to a freestanding project
+    instead of a link failing later. Outputs go to `bin/<Configuration>/libc/`.
+  - `AssemblyName` `grpcasm` names both libraries, so each project sets its own
+    `PackageId` (`GrpcAsm`, `GrpcAsm.Native`): NuGet needs distinct project names in one
+    restore graph.
 - **References:** a `ProjectReference` between `.asmproj` projects links the
   engine and adds its `include/`.
-- **Link options:** `AsmLinkFlags` passes `-Bsymbolic` and the version script to
-  `libgrpcasm.so`.
+- **Link options:** `ExportsFile` (`grpcasm.map`, the version script) and a
+  `LinkerArg` item (`-Bsymbolic`), NativeAOT's names, for `libgrpcasm.so`. The 0.2.0
+  build is byte-identical to the 0.1.0 one in `.text`, with the same 22 exports.
 - **The solution:** `GrpcAsm.slnx` lists the `.asmproj` projects with the generic
   MSBuild project type (`Type="13B669BE-BB05-4DDF-9536-439F39A36129"`), next to
-  the `.csproj` test project.
+  the `.csproj` projects. Since AsmSdk 0.2.0, Rider, Visual Studio and VS Code show
+  their files, and opening the solution no longer assembles or links anything.
 - **Packaging:** `dotnet pack` writes the native NuGet layout, which milestone E
   uses.
 

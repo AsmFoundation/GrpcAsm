@@ -62,8 +62,8 @@ sed -e 's/\bkv_hpack_global_init\b/ga_hpack_global_init/g' \
 sed -e 's/\bWorker\.table\b/Worker.app/' /audit/benchabi.asm > "$W/benchabi_ga.asm"
 for v in "${VARIANTS[@]}"; do
   T=/v/$v
-  E=$T/src/GrpcAsm/obj/Release/asm/obj
-  A=$T/samples/KvServer/obj/Release/asm/obj
+  E=$T/src/GrpcAsm/obj/Release/libc/asm/obj
+  A=$T/samples/KvServer/obj/Release/libc/asm/obj
   nasm -f elf64 -I "$T/src/GrpcAsm/include/" -I "$T/samples/KvServer/include/" \
        -o "$W/benchabi-$v.o" "$W/benchabi_ga.asm"
   objcopy --globalize-symbol=h2_process --globalize-symbol=conn_window_refill "$E/h2n.o" "$W/h2n_g-$v.o"

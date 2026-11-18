@@ -6,13 +6,13 @@
     phase) runs against this binary after every extraction step, so a step that changes
     behavior fails a test instead of passing unnoticed.
 
-    Runs on glibc (AsmRuntime=Libc): main() is entered through AsmFoundation.Sdk's crt1, like
+    Runs on glibc (TargetFramework=libc): main() is entered through AsmFoundation.Sdk's crt1, like
     KvAsm's own server.
   -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <AsmRuntime>Libc</AsmRuntime>
-    <AsmLibraryName>kvserver</AsmLibraryName>
+    <TargetFramework>libc</TargetFramework>
+    <AssemblyName>kvserver</AssemblyName>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/GrpcAsm/GrpcAsm.asmproj" />

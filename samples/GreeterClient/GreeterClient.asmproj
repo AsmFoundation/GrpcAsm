@@ -10,12 +10,12 @@
 
     Server address from the environment: GREETER_HOST (default 127.0.0.1) and GREETER_PORT
     (default 50051). Exit status 0 on OK, 1 otherwise (the status is printed). Runs on glibc
-    (AsmRuntime=Libc), entered through AsmFoundation.Sdk's crt1.
+    (TargetFramework=libc), entered through AsmFoundation.Sdk's crt1.
   -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <AsmRuntime>Libc</AsmRuntime>
-    <AsmLibraryName>greeter_client</AsmLibraryName>
+    <TargetFramework>libc</TargetFramework>
+    <AssemblyName>greeter_client</AssemblyName>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/GrpcAsm/GrpcAsm.asmproj" />

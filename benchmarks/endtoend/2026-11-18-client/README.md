@@ -21,7 +21,7 @@ drive the same server, KvAsm 0.3.0.
 - **The clients:** containers in the server's network namespace (loopback) and PID namespace
   (so kvbench reads the server's CPU time per thread, `--server-pid 1`).
 - **Paired blocks:** each block runs both clients back to back, the order alternating between
-  blocks; 2 s of warm-up, then 8 s measured. `analyze.py` compares the two runs within each
+  blocks; 2 s of warm-up, then 8 s measured. `analyze.cs` compares the two runs within each
   block, never absolute numbers from different moments.
 - **The host:** a Windows PC (i9-13900K, 32 logical CPUs) running the WSL2 Docker VM
   (32 vCPUs). Other programs were busy outside the VM: 48.8% of the 32 logical CPUs, sampled
@@ -30,7 +30,9 @@ drive the same server, KvAsm 0.3.0.
   this session's, and are not comparable with other sessions.
 
 Reproduce: `bash run.sh <KvAsm checkout> <results dir> [blocks]` (see the variables in its
-header), then `python analyze.py <results dir>`.
+header), then `dotnet run analyze.cs -- <results dir>`. The tables below were printed by
+`analyze.py`; `analyze.cs`, its .NET port of 2026-11-18, prints them byte for byte the same
+from the three results folders (Python's half-to-even rounding included).
 
 ## Shape A — client-bound: 2 client threads, 16 connections × 16 in flight
 

@@ -11,11 +11,17 @@
   -->
   <PropertyGroup>
     <OutputType>Library</OutputType>
-    <AsmRuntime>Libc</AsmRuntime>
-    <AsmLibraryName>grpcasm</AsmLibraryName>
-    <AsmLinkFlags>-Bsymbolic --version-script="$(MSBuildProjectDirectory.Replace('\','/'))/grpcasm.map"</AsmLinkFlags>
+    <TargetFramework>libc</TargetFramework>
+    <AssemblyName>grpcasm</AssemblyName>
+    <!-- Not the engine's grpcasm: NuGet needs distinct project names (see GrpcAsm.asmproj). -->
+    <PackageId>GrpcAsm.Native</PackageId>
+    <!-- The version script, under NativeAOT's name for it: only grpcasm.h's functions stay
+         exported, as grpcasm_*@@GRPCASM_0.1. Editing it relinks. -->
+    <ExportsFile>grpcasm.map</ExportsFile>
   </PropertyGroup>
   <ItemGroup>
+    <!-- Every reference inside the library binds to the library itself. -->
+    <LinkerArg Include="-Bsymbolic" />
     <ProjectReference Include="../GrpcAsm/GrpcAsm.asmproj" />
   </ItemGroup>
 </Project>
