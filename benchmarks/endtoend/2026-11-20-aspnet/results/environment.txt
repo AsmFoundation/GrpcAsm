@@ -1,0 +1,12 @@
+date: 2026-11-20T16:42:20Z
+grpcasm: 2431f2e + 0 uncommitted paths
+dotnet: SDK 11.0.100; runtime in both publishes: Microsoft.NETCore.App.Runtime.linux-x64/10.0.15
+aspnetcore: Microsoft.AspNetCore.App.Runtime.linux-x64/10.0.15; grpc-dotnet: Grpc.AspNetCore.Server/2.85.0
+GC as published: GreeterNet Workstation, GreeterAspNet Server
+bench: rounds 12, sets S1 O1 S4 O4, warm-up 12s, saturation 8s, latency 8s at 10000/5000 calls/s
+host load before (whole PC, % of its logical CPUs, 5 s): 52.7
+containers running: claude-desktops-winhost fastrun-aot buildx_buildkit_fastrun0 kvnode-dev 
+host load after (whole PC, % of its logical CPUs, 5 s): 27.3
+5.15.153.1-microsoft-standard-WSL2
+CPU(s):                             32
+Model name:                         13th Gen Intel(R) Core(TM) i9-13900K

@@ -124,12 +124,14 @@ jobs:
       # libgrpcasm.so is next to the test assembly (GrpcAsm.Net's reference to
       # GrpcAsm.Native copies it); GRPCASM_REQUIRE_LINUX turns a library that
       # cannot load into a failure instead of skipped tests.
-      - name: GrpcAsm.Net — the .NET API over libgrpcasm.so
+      # It also hosts the same service classes on Kestrel in the test process
+      # and compares their answers and errors with GrpcAsm's (ParityTests).
+      - name: GrpcAsm.Net — the .NET API over libgrpcasm.so, and parity with ASP.NET Core
         env:
           GRPCASM_REQUIRE_LINUX: "1"
         run: dotnet test --project tests/GrpcAsm.Net.Tests/GrpcAsm.Net.Tests.csproj -c Release --no-build
 
-      - name: The .NET Greeter — the same suite, typed and raw handlers
+      - name: The .NET Greeter — the same suite, as a bound grpc-dotnet class and as typed and raw handlers
         run: bash tests/greeter_net.sh
 
       # global.json selects the Microsoft.Testing.Platform runner, which

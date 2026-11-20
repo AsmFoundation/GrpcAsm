@@ -1,0 +1,184 @@
+vCPUs in the VM: 32; sets: S1 O1 S4 O4; 12 rounds; warm-up 12s, saturation 8s, latency 8s at 10000 (SayHello) / 5000 (Orders) calls/s
+  S1: asm net-raw net-typed net-service aspnet aspnet@DOTNET_gcServer=0
+  O1: net-service aspnet
+  S4: asm net-service aspnet
+  O4: net-service aspnet
+requests: hello 12 bytes, order 994 bytes (framed); replies: hello 18, order 57 bytes (framed)
+round  1 S1 asm                            700172 req/s     428.9 server-ns/call  busy  25.0%  rss    1.1 MB  p50/p99/p99.9 110/345/703 us
+round  1 S1 net-raw                        731680 req/s     472.6 server-ns/call  busy  28.7%  rss   30.8 MB  p50/p99/p99.9 138/401/645 us
+round  1 S1 net-typed                      747024 req/s     636.6 server-ns/call  busy  39.3%  rss   51.3 MB  p50/p99/p99.9 133/378/516 us
+round  1 S1 net-service                    778744 req/s     620.3 server-ns/call  busy  40.3%  rss   51.8 MB  p50/p99/p99.9 141/396/757 us
+round  1 S1 aspnet                          33853 req/s   31116.9 server-ns/call  busy  87.6%  rss  100.1 MB  p50/p99/p99.9 1409/5227/14428 us
+round  1 S1 aspnet@DOTNET_gcServer=0        36024 req/s   29236.4 server-ns/call  busy  87.4%  rss  104.5 MB  p50/p99/p99.9 703/2414/9623 us
+round  1 O1 net-service                    308254 req/s    3413.9 server-ns/call  busy  87.2%  rss   53.3 MB  p50/p99/p99.9 203/431/603 us
+round  1 O1 aspnet                          19634 req/s   53631.5 server-ns/call  busy 105.1%  rss  100.9 MB  p50/p99/p99.9 1610/5536/22667 us
+round  1 S4 asm                           2185356 req/s     611.1 server-ns/call  busy 132.8%  rss    1.7 MB  p50/p99/p99.9 -/-/- us
+round  1 S4 net-service                   2379480 req/s     873.5 server-ns/call  busy 207.0%  rss   52.3 MB  p50/p99/p99.9 -/-/- us
+round  1 S4 aspnet                         259970 req/s   15165.0 server-ns/call  busy 392.4%  rss  163.8 MB  p50/p99/p99.9 -/-/- us
+round  1 O4 net-service                    964162 req/s    4161.1 server-ns/call  busy 399.6%  rss   54.7 MB  p50/p99/p99.9 -/-/- us
+round  1 O4 aspnet                         238568 req/s   16923.3 server-ns/call  busy 334.6%  rss  160.8 MB  p50/p99/p99.9 -/-/- us
+round  2 S1 net-raw                        777040 req/s     440.6 server-ns/call  busy  34.1%  rss   30.9 MB  p50/p99/p99.9 134/376/495 us
+round  2 S1 net-typed                      767796 req/s     546.9 server-ns/call  busy  41.9%  rss   51.1 MB  p50/p99/p99.9 119/327/419 us
+round  2 S1 net-service                    764324 req/s     618.9 server-ns/call  busy  47.1%  rss   51.3 MB  p50/p99/p99.9 125/371/487 us
+round  2 S1 aspnet                          39168 req/s   26959.2 server-ns/call  busy 105.4%  rss  103.6 MB  p50/p99/p99.9 975/3211/9496 us
+round  2 S1 aspnet@DOTNET_gcServer=0        41262 req/s   25613.0 server-ns/call  busy 105.5%  rss   99.3 MB  p50/p99/p99.9 829/2452/11519 us
+round  2 S1 asm                            782256 req/s     342.1 server-ns/call  busy  26.6%  rss    1.1 MB  p50/p99/p99.9 96/273/417 us
+round  2 O1 aspnet                          23155 req/s   45584.9 server-ns/call  busy 105.3%  rss  100.7 MB  p50/p99/p99.9 799/2293/9402 us
+round  2 O1 net-service                    293588 req/s    3584.5 server-ns/call  busy 104.9%  rss   53.3 MB  p50/p99/p99.9 202/408/527 us
+round  2 S4 net-service                   2396928 req/s     867.8 server-ns/call  busy 207.3%  rss   52.1 MB  p50/p99/p99.9 -/-/- us
+round  2 S4 aspnet                         387789 req/s   10573.6 server-ns/call  busy 407.9%  rss  177.8 MB  p50/p99/p99.9 -/-/- us
+round  2 S4 asm                           2412036 req/s     537.8 server-ns/call  busy 129.2%  rss    1.5 MB  p50/p99/p99.9 -/-/- us
+round  2 O4 aspnet                         251734 req/s   16359.5 server-ns/call  busy 340.8%  rss  164.2 MB  p50/p99/p99.9 -/-/- us
+round  2 O4 net-service                    979206 req/s    4091.6 server-ns/call  busy 399.1%  rss   54.6 MB  p50/p99/p99.9 -/-/- us
+round  3 S1 net-typed                      756052 req/s     668.7 server-ns/call  busy  50.3%  rss   50.4 MB  p50/p99/p99.9 149/447/1062 us
+round  3 S1 net-service                    617420 req/s     863.4 server-ns/call  busy  53.0%  rss   51.8 MB  p50/p99/p99.9 150/433/1195 us
+round  3 S1 aspnet                          28010 req/s   37653.5 server-ns/call  busy 105.2%  rss  101.1 MB  p50/p99/p99.9 932/3902/8852 us
+round  3 S1 aspnet@DOTNET_gcServer=0        36333 req/s   29163.2 server-ns/call  busy 105.7%  rss  102.9 MB  p50/p99/p99.9 584/1753/8522 us
+round  3 S1 asm                            754672 req/s     426.3 server-ns/call  busy  32.0%  rss    1.1 MB  p50/p99/p99.9 100/298/532 us
+round  3 S1 net-raw                        790964 req/s     447.8 server-ns/call  busy  35.2%  rss   29.0 MB  p50/p99/p99.9 102/295/426 us
+round  3 O1 net-service                    310082 req/s    3400.9 server-ns/call  busy 105.1%  rss   53.3 MB  p50/p99/p99.9 240/630/1840 us
+round  3 O1 aspnet                          19028 req/s   55569.5 server-ns/call  busy 105.6%  rss  103.5 MB  p50/p99/p99.9 1414/3217/9003 us
+round  3 S4 aspnet                         349350 req/s   11575.2 server-ns/call  busy 402.8%  rss  194.1 MB  p50/p99/p99.9 -/-/- us
+round  3 S4 asm                           2153172 req/s     655.7 server-ns/call  busy 140.3%  rss    1.1 MB  p50/p99/p99.9 -/-/- us
+round  3 S4 net-service                   2268916 req/s     947.6 server-ns/call  busy 214.1%  rss   52.1 MB  p50/p99/p99.9 -/-/- us
+round  3 O4 net-service                    993704 req/s    4023.3 server-ns/call  busy 398.3%  rss   54.7 MB  p50/p99/p99.9 -/-/- us
+round  3 O4 aspnet                         239786 req/s   16898.9 server-ns/call  busy 403.4%  rss  181.9 MB  p50/p99/p99.9 -/-/- us
+round  4 S1 net-service                    822224 req/s     564.9 server-ns/call  busy  38.2%  rss   51.8 MB  p50/p99/p99.9 112/299/429 us
+round  4 S1 aspnet                          33411 req/s   31539.7 server-ns/call  busy  86.4%  rss  104.1 MB  p50/p99/p99.9 905/2823/11471 us
+round  4 S1 aspnet@DOTNET_gcServer=0        34687 req/s   30409.8 server-ns/call  busy  87.5%  rss  101.6 MB  p50/p99/p99.9 923/2630/8978 us
+round  4 S1 asm                            783516 req/s     378.9 server-ns/call  busy  24.5%  rss    1.0 MB  p50/p99/p99.9 95/275/1748 us
+round  4 S1 net-raw                        797852 req/s     429.8 server-ns/call  busy  28.2%  rss   30.9 MB  p50/p99/p99.9 109/311/415 us
+round  4 S1 net-typed                      773564 req/s     573.0 server-ns/call  busy  36.4%  rss   51.2 MB  p50/p99/p99.9 116/416/705 us
+round  4 O1 aspnet                          20536 req/s   51390.3 server-ns/call  busy  87.4%  rss  100.9 MB  p50/p99/p99.9 1058/5010/12906 us
+round  4 O1 net-service                    314560 req/s    3352.7 server-ns/call  busy  87.1%  rss   53.3 MB  p50/p99/p99.9 220/538/717 us
+round  4 S4 asm                           2104668 req/s     686.6 server-ns/call  busy 118.9%  rss    1.3 MB  p50/p99/p99.9 -/-/- us
+round  4 S4 net-service                   2240656 req/s     952.5 server-ns/call  busy 212.6%  rss   52.3 MB  p50/p99/p99.9 -/-/- us
+round  4 S4 aspnet                         386073 req/s   10582.8 server-ns/call  busy 406.1%  rss  183.3 MB  p50/p99/p99.9 -/-/- us
+round  4 O4 aspnet                         256298 req/s   15759.7 server-ns/call  busy 402.2%  rss  189.6 MB  p50/p99/p99.9 -/-/- us
+round  4 O4 net-service                    818576 req/s    4923.1 server-ns/call  busy 332.0%  rss   54.5 MB  p50/p99/p99.9 -/-/- us
+round  5 S1 aspnet                          33306 req/s   31811.5 server-ns/call  busy 105.7%  rss   99.1 MB  p50/p99/p99.9 975/3864/18696 us
+round  5 S1 aspnet@DOTNET_gcServer=0        34619 req/s   30647.5 server-ns/call  busy 105.8%  rss   99.8 MB  p50/p99/p99.9 924/2952/7393 us
+round  5 S1 asm                            687376 req/s     514.8 server-ns/call  busy  35.2%  rss    1.1 MB  p50/p99/p99.9 105/315/493 us
+round  5 S1 net-raw                        746096 req/s     482.2 server-ns/call  busy  35.8%  rss   30.9 MB  p50/p99/p99.9 118/382/1280 us
+round  5 S1 net-typed                      548128 req/s     847.4 server-ns/call  busy  46.2%  rss   51.2 MB  p50/p99/p99.9 118/378/1862 us
+round  5 S1 net-service                    790208 req/s     592.4 server-ns/call  busy  46.6%  rss   51.2 MB  p50/p99/p99.9 112/340/544 us
+round  5 O1 net-service                    305998 req/s    3453.1 server-ns/call  busy 105.3%  rss   55.1 MB  p50/p99/p99.9 209/472/694 us
+round  5 O1 aspnet                          20583 req/s   51289.4 server-ns/call  busy 105.4%  rss  100.3 MB  p50/p99/p99.9 1626/4508/17447 us
+round  5 S4 net-service                   2352320 req/s     925.5 server-ns/call  busy 216.3%  rss   51.7 MB  p50/p99/p99.9 -/-/- us
+round  5 S4 aspnet                         312800 req/s   13005.4 server-ns/call  busy 404.8%  rss  174.9 MB  p50/p99/p99.9 -/-/- us
+round  5 S4 asm                           2325812 req/s     597.9 server-ns/call  busy 113.9%  rss    1.3 MB  p50/p99/p99.9 -/-/- us
+round  5 O4 net-service                    985910 req/s    4084.2 server-ns/call  busy 401.1%  rss   56.2 MB  p50/p99/p99.9 -/-/- us
+round  5 O4 aspnet                         265904 req/s   15206.1 server-ns/call  busy 402.9%  rss  189.1 MB  p50/p99/p99.9 -/-/- us
+round  6 S1 aspnet@DOTNET_gcServer=0        36882 req/s   28634.9 server-ns/call  busy 105.4%  rss  101.3 MB  p50/p99/p99.9 1062/3468/14095 us
+round  6 S1 asm                            780116 req/s     355.0 server-ns/call  busy  27.6%  rss    1.1 MB  p50/p99/p99.9 116/348/499 us
+round  6 S1 net-raw                        773800 req/s     474.0 server-ns/call  busy  36.5%  rss   28.9 MB  p50/p99/p99.9 124/378/512 us
+round  6 S1 net-typed                      780916 req/s     569.0 server-ns/call  busy  44.3%  rss   50.7 MB  p50/p99/p99.9 117/338/477 us
+round  6 S1 net-service                    781156 req/s     619.0 server-ns/call  busy  48.2%  rss   51.5 MB  p50/p99/p99.9 128/381/669 us
+round  6 S1 aspnet                          36059 req/s   29335.6 server-ns/call  busy 105.5%  rss   98.2 MB  p50/p99/p99.9 795/2186/8441 us
+round  6 O1 aspnet                          21646 req/s   48728.0 server-ns/call  busy 105.3%  rss  104.7 MB  p50/p99/p99.9 721/2028/9507 us
+round  6 O1 net-service                    298566 req/s    3531.3 server-ns/call  busy 105.1%  rss   53.0 MB  p50/p99/p99.9 294/566/924 us
+round  6 S4 aspnet                         393463 req/s   10342.2 server-ns/call  busy 405.4%  rss  183.9 MB  p50/p99/p99.9 -/-/- us
+round  6 S4 asm                           2413168 req/s     578.7 server-ns/call  busy 114.7%  rss    1.6 MB  p50/p99/p99.9 -/-/- us
+round  6 S4 net-service                   2406456 req/s     910.5 server-ns/call  busy 217.9%  rss   52.2 MB  p50/p99/p99.9 -/-/- us
+round  6 O4 aspnet                         263920 req/s   15345.6 server-ns/call  busy 403.5%  rss  166.9 MB  p50/p99/p99.9 -/-/- us
+round  6 O4 net-service                    967056 req/s    4148.2 server-ns/call  busy 398.6%  rss   54.7 MB  p50/p99/p99.9 -/-/- us
+round  7 S1 asm                            690744 req/s     476.0 server-ns/call  busy  27.1%  rss    1.1 MB  p50/p99/p99.9 105/334/464 us
+round  7 S1 net-raw                        762040 req/s     466.2 server-ns/call  busy  29.2%  rss   28.7 MB  p50/p99/p99.9 127/381/657 us
+round  7 S1 net-typed                      749000 req/s     611.6 server-ns/call  busy  37.7%  rss   51.1 MB  p50/p99/p99.9 114/319/493 us
+round  7 S1 net-service                    809796 req/s     554.5 server-ns/call  busy  36.7%  rss   53.2 MB  p50/p99/p99.9 112/314/438 us
+round  7 S1 aspnet                          41852 req/s   25237.0 server-ns/call  busy  87.4%  rss  101.4 MB  p50/p99/p99.9 595/1888/9667 us
+round  7 S1 aspnet@DOTNET_gcServer=0        37072 req/s   28480.0 server-ns/call  busy  86.9%  rss  103.9 MB  p50/p99/p99.9 621/1985/11897 us
+round  7 O1 net-service                    311110 req/s    3391.6 server-ns/call  busy  86.7%  rss   55.3 MB  p50/p99/p99.9 262/589/783 us
+round  7 O1 aspnet                          22176 req/s   47581.7 server-ns/call  busy  86.4%  rss  101.5 MB  p50/p99/p99.9 1434/4663/16472 us
+round  7 S4 asm                           2299068 req/s     603.1 server-ns/call  busy 114.5%  rss    1.7 MB  p50/p99/p99.9 -/-/- us
+round  7 S4 net-service                   2169808 req/s     984.4 server-ns/call  busy 212.8%  rss   51.7 MB  p50/p99/p99.9 -/-/- us
+round  7 S4 aspnet                         339489 req/s   11932.9 server-ns/call  busy 402.5%  rss  180.5 MB  p50/p99/p99.9 -/-/- us
+round  7 O4 net-service                    968622 req/s    4149.8 server-ns/call  busy 400.2%  rss   54.8 MB  p50/p99/p99.9 -/-/- us
+round  7 O4 aspnet                         241808 req/s   16781.3 server-ns/call  busy 403.8%  rss  161.7 MB  p50/p99/p99.9 -/-/- us
+round  8 S1 net-raw                        767672 req/s     473.4 server-ns/call  busy  36.2%  rss   29.0 MB  p50/p99/p99.9 127/394/671 us
+round  8 S1 net-typed                      762556 req/s     601.7 server-ns/call  busy  45.7%  rss   50.7 MB  p50/p99/p99.9 149/430/808 us
+round  8 S1 net-service                    737320 req/s     818.8 server-ns/call  busy  60.1%  rss   52.0 MB  p50/p99/p99.9 171/449/697 us
+round  8 S1 aspnet                          35117 req/s   30203.6 server-ns/call  busy 105.7%  rss  101.3 MB  p50/p99/p99.9 802/2609/10491 us
+round  8 S1 aspnet@DOTNET_gcServer=0        37253 req/s   28384.1 server-ns/call  busy 105.5%  rss   99.6 MB  p50/p99/p99.9 1076/3101/9074 us
+round  8 S1 asm                            755500 req/s     414.0 server-ns/call  busy  31.1%  rss    1.1 MB  p50/p99/p99.9 107/318/822 us
+round  8 O1 aspnet                          22757 req/s   46527.8 server-ns/call  busy 105.7%  rss  101.9 MB  p50/p99/p99.9 763/2349/14928 us
+round  8 O1 net-service                    296388 req/s    3565.5 server-ns/call  busy 105.3%  rss   53.0 MB  p50/p99/p99.9 265/577/1040 us
+round  8 S4 net-service                   2303320 req/s     959.9 server-ns/call  busy 220.3%  rss   52.1 MB  p50/p99/p99.9 -/-/- us
+round  8 S4 aspnet                         375995 req/s   10974.2 server-ns/call  busy 410.6%  rss  161.4 MB  p50/p99/p99.9 -/-/- us
+round  8 S4 asm                           2241332 req/s     619.0 server-ns/call  busy 113.5%  rss    1.5 MB  p50/p99/p99.9 -/-/- us
+round  8 O4 aspnet                         252596 req/s   16022.6 server-ns/call  busy 403.3%  rss  157.3 MB  p50/p99/p99.9 -/-/- us
+round  8 O4 net-service                    787326 req/s    4959.1 server-ns/call  busy 388.4%  rss   62.5 MB  p50/p99/p99.9 -/-/- us
+round  9 S1 net-typed                      602324 req/s     852.7 server-ns/call  busy  51.2%  rss   52.4 MB  p50/p99/p99.9 185/471/14649 us
+round  9 S1 net-service                    780176 req/s     645.1 server-ns/call  busy  50.2%  rss   51.8 MB  p50/p99/p99.9 136/381/999 us
+round  9 S1 aspnet                          37102 req/s   28473.6 server-ns/call  busy 105.4%  rss  102.6 MB  p50/p99/p99.9 669/1933/11659 us
+round  9 S1 aspnet@DOTNET_gcServer=0        35032 req/s   30189.2 server-ns/call  busy 105.5%  rss  103.3 MB  p50/p99/p99.9 508/1956/6151 us
+round  9 S1 asm                            760912 req/s     404.5 server-ns/call  busy  30.7%  rss    1.1 MB  p50/p99/p99.9 110/327/688 us
+round  9 S1 net-raw                        763152 req/s     500.6 server-ns/call  busy  38.1%  rss   29.1 MB  p50/p99/p99.9 115/342/684 us
+round  9 O1 net-service                    308628 req/s    3422.1 server-ns/call  busy 105.2%  rss   52.6 MB  p50/p99/p99.9 250/561/1075 us
+round  9 O1 aspnet                          18875 req/s   56027.0 server-ns/call  busy 105.5%  rss   99.5 MB  p50/p99/p99.9 1564/4645/15332 us
+round  9 S4 aspnet                         376610 req/s   10954.2 server-ns/call  busy 410.4%  rss  167.2 MB  p50/p99/p99.9 -/-/- us
+round  9 S4 asm                           2200820 req/s     638.1 server-ns/call  busy 114.2%  rss    3.3 MB  p50/p99/p99.9 -/-/- us
+round  9 S4 net-service                   2012328 req/s    1038.8 server-ns/call  busy 208.2%  rss   51.5 MB  p50/p99/p99.9 -/-/- us
+round  9 O4 net-service                   1007704 req/s    3997.1 server-ns/call  busy 401.2%  rss   54.6 MB  p50/p99/p99.9 -/-/- us
+round  9 O4 aspnet                         234951 req/s   17240.9 server-ns/call  busy 332.9%  rss  167.0 MB  p50/p99/p99.9 -/-/- us
+round 10 S1 net-service                    777272 req/s     627.0 server-ns/call  busy  48.6%  rss   55.7 MB  p50/p99/p99.9 147/427/838 us
+round 10 S1 aspnet                          34224 req/s   30919.4 server-ns/call  busy 105.6%  rss  101.3 MB  p50/p99/p99.9 980/3092/9368 us
+round 10 S1 aspnet@DOTNET_gcServer=0        30238 req/s   34997.5 server-ns/call  busy  86.0%  rss  102.4 MB  p50/p99/p99.9 1185/6242/17840 us
+round 10 S1 asm                            716880 req/s     457.3 server-ns/call  busy  26.9%  rss    1.1 MB  p50/p99/p99.9 106/323/727 us
+round 10 S1 net-raw                        767376 req/s     479.7 server-ns/call  busy  30.2%  rss   31.1 MB  p50/p99/p99.9 106/318/536 us
+round 10 S1 net-typed                      738232 req/s     604.4 server-ns/call  busy  36.4%  rss   53.1 MB  p50/p99/p99.9 133/385/734 us
+round 10 O1 aspnet                          23012 req/s   45938.4 server-ns/call  busy  86.1%  rss  100.9 MB  p50/p99/p99.9 1062/3550/14806 us
+round 10 O1 net-service                    288134 req/s    3668.3 server-ns/call  busy  86.8%  rss   53.0 MB  p50/p99/p99.9 244/525/1124 us
+round 10 S4 asm                           2122096 req/s     671.4 server-ns/call  busy 116.3%  rss    1.7 MB  p50/p99/p99.9 -/-/- us
+round 10 S4 net-service                   2359836 req/s     899.2 server-ns/call  busy 211.5%  rss   53.4 MB  p50/p99/p99.9 -/-/- us
+round 10 S4 aspnet                         367145 req/s   11076.1 server-ns/call  busy 405.1%  rss  181.0 MB  p50/p99/p99.9 -/-/- us
+round 10 O4 aspnet                         252614 req/s   16027.4 server-ns/call  busy 329.1%  rss  192.3 MB  p50/p99/p99.9 -/-/- us
+round 10 O4 net-service                   1022268 req/s    3955.8 server-ns/call  busy 402.1%  rss   54.5 MB  p50/p99/p99.9 -/-/- us
+round 11 S1 aspnet                          36802 req/s   28775.1 server-ns/call  busy 105.7%  rss  101.6 MB  p50/p99/p99.9 980/2961/13554 us
+round 11 S1 aspnet@DOTNET_gcServer=0        33161 req/s   32010.8 server-ns/call  busy 105.9%  rss  102.4 MB  p50/p99/p99.9 451/1575/11506 us
+round 11 S1 asm                            763436 req/s     413.4 server-ns/call  busy  31.5%  rss    1.1 MB  p50/p99/p99.9 106/313/458 us
+round 11 S1 net-raw                        773448 req/s     471.2 server-ns/call  busy  36.3%  rss   33.1 MB  p50/p99/p99.9 128/382/662 us
+round 11 S1 net-typed                      742716 req/s     618.1 server-ns/call  busy  45.7%  rss   51.1 MB  p50/p99/p99.9 124/367/654 us
+round 11 S1 net-service                    654068 req/s     803.0 server-ns/call  busy  51.7%  rss   51.5 MB  p50/p99/p99.9 131/404/698 us
+round 11 O1 net-service                    311558 req/s    3411.7 server-ns/call  busy 106.0%  rss   52.9 MB  p50/p99/p99.9 216/558/1038 us
+round 11 O1 aspnet                          23317 req/s   45431.7 server-ns/call  busy 105.7%  rss  101.6 MB  p50/p99/p99.9 639/1741/20888 us
+round 11 S4 net-service                   2364588 req/s     899.5 server-ns/call  busy 211.9%  rss   52.0 MB  p50/p99/p99.9 -/-/- us
+round 11 S4 aspnet                         318082 req/s   12784.3 server-ns/call  busy 403.3%  rss  194.4 MB  p50/p99/p99.9 -/-/- us
+round 11 S4 asm                           2235724 req/s     623.8 server-ns/call  busy 113.6%  rss    1.7 MB  p50/p99/p99.9 -/-/- us
+round 11 O4 net-service                    899480 req/s    4421.2 server-ns/call  busy 395.3%  rss   54.6 MB  p50/p99/p99.9 -/-/- us
+round 11 O4 aspnet                         213849 req/s   18818.4 server-ns/call  busy 400.2%  rss  191.2 MB  p50/p99/p99.9 -/-/- us
+round 12 S1 aspnet@DOTNET_gcServer=0        30302 req/s   34895.4 server-ns/call  busy  86.5%  rss  106.5 MB  p50/p99/p99.9 1027/11785/21998 us
+round 12 S1 asm                            753272 req/s     440.4 server-ns/call  busy  33.1%  rss    1.1 MB  p50/p99/p99.9 104/291/388 us
+round 12 S1 net-raw                        766332 req/s     479.2 server-ns/call  busy  36.6%  rss   28.9 MB  p50/p99/p99.9 143/529/2560 us
+round 12 S1 net-typed                      641476 req/s     858.2 server-ns/call  busy  54.9%  rss   51.2 MB  p50/p99/p99.9 191/486/885 us
+round 12 S1 net-service                    692240 req/s     843.5 server-ns/call  busy  58.0%  rss   51.2 MB  p50/p99/p99.9 163/445/1106 us
+round 12 S1 aspnet                          22264 req/s   47548.0 server-ns/call  busy 105.5%  rss   98.4 MB  p50/p99/p99.9 928/2982/9556 us
+round 12 O1 aspnet                          23070 req/s   45866.4 server-ns/call  busy 105.6%  rss  104.3 MB  p50/p99/p99.9 840/4152/27624 us
+round 12 O1 net-service                    291150 req/s    3627.3 server-ns/call  busy 105.2%  rss   53.3 MB  p50/p99/p99.9 196/418/728 us
+round 12 S4 aspnet                         359631 req/s   11400.4 server-ns/call  busy 407.5%  rss  166.5 MB  p50/p99/p99.9 -/-/- us
+round 12 S4 asm                           2348672 req/s     612.0 server-ns/call  busy 117.7%  rss    1.5 MB  p50/p99/p99.9 -/-/- us
+round 12 S4 net-service                   2358336 req/s     914.8 server-ns/call  busy 214.5%  rss   56.3 MB  p50/p99/p99.9 -/-/- us
+round 12 O4 aspnet                         246665 req/s   16476.8 server-ns/call  busy 404.7%  rss  157.6 MB  p50/p99/p99.9 -/-/- us
+round 12 O4 net-service                   1010242 req/s    3985.9 server-ns/call  busy 363.0%  rss   54.7 MB  p50/p99/p99.9 -/-/- us
+
+== S1
+variant                          req/s     ns/call    busy   rss MB     p50/p99/p99.9 us        req/s vs aspnet    aspnet ns / this ns
+asm                             755086       420.1   29.1%      1.1          105/316/515    20.85x [16.50..33.83]    72.75x [53.02..107.97]
+net-raw                         767524       473.0   35.5%     30.0          125/379/651    21.74x [18.21..34.42]    64.13x [54.13..99.22]
+net-typed                       748012       614.9   45.0%     51.2          128/381/719    21.61x [16.23..28.81]    49.75x [33.39..56.31]
+net-service                     778008       623.6   48.4%     51.8          133/388/697    21.85x [17.77..31.09]    46.45x [35.83..56.37]
+aspnet                           34671     30561.5  105.5%    101.3       930/2971/10079     1.00x [1.00..1.00]     1.00x [1.00..1.00]
+aspnet@DOTNET_gcServer=0         35528     29712.8  105.5%    102.4       876/2541/10564     1.04x [0.88..1.36]     1.04x [0.88..1.36]
+== O1
+variant                          req/s     ns/call    busy   rss MB     p50/p99/p99.9 us        req/s vs aspnet    aspnet ns / this ns
+net-service                     307126      3437.6  105.1%     53.3          230/548/853    13.91x [12.52..16.35]    13.91x [12.52..16.37]
+aspnet                           21911     48154.8  105.4%    101.2      1060/3851/15130     1.00x [1.00..1.00]     1.00x [1.00..1.00]
+== S4
+variant                          req/s     ns/call    busy   rss MB     p50/p99/p99.9 us        req/s vs aspnet    aspnet ns / this ns
+asm                            2238528       615.5  115.5%      1.6                    -     6.19x [5.45..8.41]    18.25x [15.41..24.82]
+net-service                    2355328       920.1  212.7%     52.1                    -     6.41x [5.34..9.15]    12.20x [10.55..17.36]
+aspnet                          363388     11238.2  405.2%    179.2                    -     1.00x [1.00..1.00]     1.00x [1.00..1.00]
+== O4
+variant                          req/s     ns/call    busy   rss MB     p50/p99/p99.9 us        req/s vs aspnet    aspnet ns / this ns
+net-service                     973914      4119.9  398.9%     54.7                    -     4.02x [3.12..4.29]     4.05x [3.20..4.31]
+aspnet                          249200     16418.2  402.6%    166.9                    -     1.00x [1.00..1.00]     1.00x [1.00..1.00]

@@ -363,7 +363,7 @@ matrix, CI, and the engine's own configuration struct (below).
 
 ## Milestone C — the APIs
 
-**Status (2026-11-18): C1, C2, C3 and C4 are done. C5, Python, is next in C.**
+**Status (2026-11-20): C1, C2, C3, C4 and C4b are done. C5, Python, is next in C.**
 
 **The steps (planned 2026-11-17, after milestone B):**
 
@@ -509,10 +509,11 @@ matrix, CI, and the engine's own configuration struct (below).
       `Fail(status, message)` call `grpcasm_call_reply`/`_fail`; a second
       answer is `InvalidOperationException`.
     - **Exceptions never cross into assembly:** an `RpcException` is answered
-      with its status, anything else INTERNAL ("Exception was thrown by
-      handler.", grpc-dotnet's text). An exception after an answer leaves the
-      answer standing. Out of memory ends the connection, as the C ABI
-      requires.
+      with its status, anything else UNKNOWN "Exception was thrown by
+      handler.", as grpc-dotnet answers it. (C4 sent INTERNAL with that text;
+      C4b's parity tests showed grpc-dotnet's status is UNKNOWN, and every
+      path was aligned.) An exception after an answer leaves the answer
+      standing. Out of memory ends the connection, as the C ABI requires.
     - **Typed handlers:** a request that does not parse is INVALID_ARGUMENT
       "malformed request message", as the engine's own services answer it.
       Google.Protobuf also refuses a `string` field that is not valid UTF-8.
@@ -580,6 +581,62 @@ matrix, CI, and the engine's own configuration struct (below).
       when its thread shares the worker's vCPU. A 0.3 s warm-up measured
       +587 ns. With tiering off it is +300 ns: optimized at once, without
       PGO.
+- **C4b, grpc-dotnet service classes, and the comparison with ASP.NET Core
+  (done 2026-11-20).** Asked: "In examples, I want my C# code to run server
+  GRPC using assembly and outperform C# ASP.NET GRPC". The owner chose, from
+  rendered options: the same C# class on both servers; synchronous handlers
+  only for now; the Standard proof (two workloads, one and four server vCPUs,
+  calls per second, CPU per call, latency, RSS, paired rounds); the example in
+  GrpcAsm's samples, linked from AsmSdk's Examples page.
+  - **`GrpcAsmServer.ServiceBinder`:** the `ServiceBinderBase` that Grpc.Tools'
+    generated `BindService(ServiceBinderBase, TServiceBase)` registers with:
+    `Greeter.BindService(server.ServiceBinder, new GreeterService())`, no
+    reflection. Each unary method is an `AddUnary` under `Method.FullName`;
+    requests and responses go through the method's marshallers, over the
+    engine's receive buffer (a `MemoryManager` on the native pointer, no copy)
+    and a per-worker buffer writer; a `ServerCallContext` per call.
+  - **Errors as grpc-dotnet sends them, measured:** the tests host the same
+    classes on Kestrel in the same process and compare what a client gets,
+    server against server: `RpcException`, any other exception (UNKNOWN), a
+    faulted `Task`, a null response (CANCELLED), a status set on the context, a
+    malformed request (UNKNOWN). The delegate handlers now say UNKNOWN too.
+  - **What GrpcAsm refuses, documented and tested on both sides:** streaming
+    methods (refused when the service is bound, naming the method); a `Task`
+    not complete when the handler returns (UNIMPLEMENTED with the reason; the
+    task runs on, its fault observed); custom response headers and trailers
+    (UNIMPLEMENTED, rather than dropped). The context carries the method only:
+    no request headers, deadline, peer or cancellation, since the C ABI passes
+    the message alone. These close with the asynchronous answer of "Later in
+    C".
+  - **Samples:** `samples/Greeter.Service` (GreeterService, and OrdersService,
+    whose ~1 KiB order is the second workload), `samples/GreeterNet` (the
+    classes through the binder by default; the delegates as `typed` and
+    `raw`), `samples/GreeterAspNet` (the same classes on ASP.NET Core, as the
+    `dotnet new grpc` template sets them up, the content root pinned to the
+    program's folder: a pilot found the template's working-directory content
+    root logging every call when started elsewhere, 8,364 calls/s instead of
+    tens of thousands).
+  - **Verified:** 56 .NET tests on Linux; the Greeters' suite (h2spec 146/146)
+    on GreeterNet in all three modes; CI green on the branch.
+  - **Measured** (`benchmarks/endtoend/2026-11-20-aspnet`, 12 paired rounds, the
+    server pinned, every call checked): the same classes on GrpcAsm against
+    ASP.NET Core gRPC (Kestrel, grpc-dotnet 2.85, .NET 10.0.15):
+    - **4 vCPUs:** SayHello 2,355,328 against 363,388 calls/s (6.4×, a floor:
+      h2load is the limit) at 12.2× less CPU per call (0.92 against 11.24
+      µs); a 989-byte order 973,914 against 249,200 calls/s, both saturated
+      (4.0×), 4.0× less CPU per call (4.12 against 16.42 µs).
+    - **1 vCPU:** SayHello 21.9× (a floor), 46× less CPU per call (0.62
+      against 30.56 µs); the order 13.9× (3.44 against 48.15 µs).
+    - **Latency at a fixed rate both sustain (1 vCPU):** p99 7.3× lower for
+      both workloads (388 against 2,972 µs; 548 against 3,851 µs).
+    - **Memory:** 52–55 MB peak RSS against 101–179 MB.
+    - **The class costs what a delegate costs:** +7 ns per call against the
+      typed delegate, paired (noise); the typed delegate's +206 ns over the
+      assembly Greeter repeats C4's +201.
+    - **Not the GC:** ASP.NET Core with Workstation GC costs 0.96× of its Server
+      GC per call.
+    - ASP.NET Core costs 2.7–2.9× less per call on four vCPUs than on one, so
+      the four-vCPU rows are the fair headline.
 - **C5, Python** (`grpcasm`, over the C ABI): ctypes, so there are no build
   dependencies. A wheel bundles `libgrpcasm.so`.
 - **Later in C:** streaming calls through the C ABI (client streaming as it
@@ -777,7 +834,8 @@ next in D.
   - A handler that blocks (I/O, a lock, a long computation) stalls every
     connection of its worker. Until the C ABI has an asynchronous answer,
     such work needs its own threads and a handler that only reads their
-    results.
+    results. A bound grpc-dotnet class that really awaits is refused
+    UNIMPLEMENTED (C4b), so it cannot block a worker by accident.
   - The typed path allocates per call, so its cost includes the GC.
   - Its JIT converges only after seconds of load. Services that need their
     best numbers from the first second can turn tiering off and give up PGO
