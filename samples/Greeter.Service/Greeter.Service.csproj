@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Greeter.Service: the C# gRPC services that both sample servers host, unchanged:
+      samples/GreeterNet     on GrpcAsmServer: the engine is GrpcAsm's assembly (libgrpcasm.so),
+                             bound with  Greeter.BindService(server.ServiceBinder, new GreeterService())
+      samples/GreeterAspNet  on ASP.NET Core (Kestrel + grpc-dotnet), bound with
+                             app.MapGrpcService<GreeterService>()
+    Ordinary grpc-dotnet services: classes deriving from the bases Grpc.Tools generates, with
+    Task-returning methods and a ServerCallContext. The same class on both servers is what makes
+    benchmarks/endtoend/2026-11-20-aspnet like for like: the handlers' own code is identical,
+    only the server underneath differs.
+
+      helloworld.Greeter/SayHello  "Hello " + name (the canonical example)
+      shop.Orders/Place            prices a ~1 KiB order (the benchmark's second workload)
+
+    Both client and server classes are generated: the servers use the bases, the tests and the
+    benchmark's request generator the clients and messages.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>GrpcAsm.Samples</RootNamespace>
+    <!-- Every public member documented: missing docs are errors (TreatWarningsAsErrors). The
+         generated code disables the warning for itself. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Versions as in tests/Directory.Packages.props (KvAsm's client solution's). -->
+    <PackageReference Include="Google.Protobuf" Version="3.36.2" />
+    <PackageReference Include="Grpc.Core.Api" Version="2.85.0" />
+    <PackageReference Include="Grpc.Tools" Version="2.85.0" PrivateAssets="All" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Protobuf Include="Protos/helloworld.proto" GrpcServices="Both" />
+    <Protobuf Include="Protos/orders.proto" GrpcServices="Both" />
+  </ItemGroup>
+</Project>

@@ -1,20 +1,32 @@
 // =============================================================================
-// GreeterNet: helloworld.Greeter/SayHello on GrpcAsmServer, the handler in C# (milestone C4).
+// GreeterNet: C# gRPC services on GrpcAsmServer, whose engine is assembly.
 //
-// The engine (assembly, in libgrpcasm.so) does HTTP/2, HPACK, the gRPC rules, the health
-// service and the event loops; the handler runs inline on the worker thread that read the
-// request, through GrpcAsm.Net's reverse call. It answers as samples/Greeter (NASM) and
-// samples/GreeterC (C) do, with the same settings, log lines and exit codes, so
-// tests/greeter/run.sh checks all three (tests/greeter_net.sh runs it on this one, once per
-// handler). One input differs, by protobuf's rules: a name that is not valid UTF-8 (see
-// SayHello.Typed).
+// The engine (libgrpcasm.so) does HTTP/2, HPACK, the gRPC rules, the health service and the
+// event loops; the C# handlers run inline on the worker thread that read the request, through
+// GrpcAsm.Net's reverse call. By default the services are the classes of samples/Greeter.Service,
+// the same ones samples/GreeterAspNet hosts on ASP.NET Core, bound with one line each:
+//
+//     Greeter.BindService(server.ServiceBinder, new GreeterService());
+//     Orders.BindService(server.ServiceBinder, new OrdersService());
+//
+// SayHello answers as samples/Greeter (NASM) and samples/GreeterC (C) do, with the same
+// settings, log lines and exit codes, so tests/greeter/run.sh checks all three
+// (tests/greeter_net.sh runs it on this one, once per mode). One input differs, by protobuf's
+// rules: a name that is not valid UTF-8 (see SayHello.Typed).
 //
 // Settings: GREETER_PORT (1..65535, default 50051) and GREETER_WORKERS (1..256, default 1),
-// parsed strictly as the other Greeters parse them; GREETER_MODE picks the handler:
-//   typed  (default) Google.Protobuf: HelloRequest parsed, HelloReply serialized on the stack;
-//          a name that is not valid UTF-8 is INVALID_ARGUMENT (protobuf's string rule)
-//   raw    the request's bytes: GrpcAsmProtobuf finds field 1 in place, the reply is framed
-//          by hand, the name echoed as bytes; what a hand-tuned .NET handler costs
+// parsed strictly as the other Greeters parse them; GREETER_MODE picks how SayHello is written:
+//   service (default) GreeterService, a grpc-dotnet class, through GrpcAsmServer.ServiceBinder:
+//           its marshallers, a Task, a ServerCallContext per call
+//   typed   a Func<HelloRequest, HelloReply>: HelloRequest parsed, HelloReply serialized on
+//           the stack, no Task or context
+//   raw     the request's bytes: GrpcAsmProtobuf finds field 1 in place, the reply is framed
+//           by hand, the name echoed as bytes; what a hand-tuned .NET handler costs
+// In the first two, a name that is not valid UTF-8 is refused (protobuf's string rule), as is a
+// request that is not a HelloRequest: typed answers INVALID_ARGUMENT "malformed request message"
+// (the Greeters' answer); service answers as ASP.NET Core does, UNKNOWN "Exception was thrown by
+// handler." (tests/greeter/run.sh expects each).
+// shop.Orders/Place is OrdersService through the binder in every mode.
 // An invalid setting is logged with its name and the process exits 2; a server that cannot
 // start exits 1 (the library logs why: a port in use, a worker that failed).
 // =============================================================================
@@ -23,8 +35,8 @@ using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text;
 using Grpc.Core;
-using GrpcAsm.Greeter.Interop;
 using GrpcAsm.Net;
+using GrpcAsm.Samples;
 
 if (!Settings.TryRead("GREETER_PORT", 1, 65535, 50051, out uint port))
 {
@@ -38,8 +50,8 @@ if (!Settings.TryRead("GREETER_WORKERS", 1, 256, 1, out uint workers))
     return 2;
 }
 
-string mode = Environment.GetEnvironmentVariable("GREETER_MODE") ?? "typed";
-if (mode is not ("typed" or "raw"))
+string mode = Environment.GetEnvironmentVariable("GREETER_MODE") ?? "service";
+if (mode is not ("service" or "typed" or "raw"))
 {
     Log.Line("ERROR", "msg=\"invalid setting\" name=GREETER_MODE");
     return 2;
@@ -62,14 +74,22 @@ catch (Exception e) when (e is DllNotFoundException or BadImageFormatException o
 
 using (server)
 {
-    if (mode == "raw")
+    switch (mode)
     {
-        server.AddUnary("/helloworld.Greeter/SayHello", SayHello.Raw);
+        case "raw":
+            server.AddUnary("/helloworld.Greeter/SayHello", SayHello.Raw);
+            break;
+        case "typed":
+            server.AddUnary<HelloRequest, HelloReply>("/helloworld.Greeter/SayHello", SayHello.Typed);
+            break;
+        default:
+            // The grpc-dotnet class, unchanged: what samples/GreeterAspNet maps with
+            // app.MapGrpcService<GreeterService>().
+            Greeter.BindService(server.ServiceBinder, new GreeterService());
+            break;
     }
-    else
-    {
-        server.AddUnary<HelloRequest, HelloReply>("/helloworld.Greeter/SayHello", SayHello.Typed);
-    }
+
+    Orders.BindService(server.ServiceBinder, new OrdersService());
 
     // SIGTERM and SIGINT stop the server, as grpcasm_server_run does for the C Greeter: the
     // registrations cancel the runtime's default (exit at once) and release the main thread,
@@ -104,10 +124,13 @@ using (server)
 
 return 0;
 
-/// <summary>The two SayHello handlers: HelloReply{message = "Hello " + HelloRequest.name}.</summary>
+/// <summary>
+/// The two SayHello handlers written against GrpcAsm.Net's own API, for comparison with
+/// GreeterService (the default): HelloReply{message = "Hello " + HelloRequest.name}.
+/// </summary>
 internal static class SayHello
 {
-    /// <summary>The typed handler: what most services write.</summary>
+    /// <summary>The typed handler: a plain function of the message, no Task or context.</summary>
     /// <param name="request">The parsed request.</param>
     /// <returns>The reply; GrpcAsmServer serializes it on the stack.</returns>
     /// <remarks>

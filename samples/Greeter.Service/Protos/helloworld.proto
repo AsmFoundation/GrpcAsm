@@ -1,0 +1,26 @@
+// The canonical gRPC example service (grpc/examples/protos/helloworld.proto, Apache-2.0): the
+// same package, service, messages and field numbers as tests/Greeter.Interop/Protos/helloworld.proto,
+// so it is the same service on the wire. Only the C# namespace differs, so that a project can use
+// these sample types and the interop tests' types side by side (GrpcAsm.Net.Tests does). It is the
+// services' own namespace, so GreeterService reads as the grpc template does: ": Greeter.GreeterBase".
+syntax = "proto3";
+
+option csharp_namespace = "GrpcAsm.Samples";
+
+package helloworld;
+
+// The greeting service.
+service Greeter {
+  // Sends a greeting: "Hello " + name.
+  rpc SayHello (HelloRequest) returns (HelloReply);
+}
+
+// The request message containing the user's name.
+message HelloRequest {
+  string name = 1;
+}
+
+// The response message containing the greeting.
+message HelloReply {
+  string message = 1;
+}

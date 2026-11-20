@@ -7,6 +7,8 @@
   </Folder>
   <Folder Name="/samples/">
     <Project Path="samples/Greeter/Greeter.asmproj" Type="13B669BE-BB05-4DDF-9536-439F39A36129" />
+    <Project Path="samples/Greeter.Service/Greeter.Service.csproj" />
+    <Project Path="samples/GreeterAspNet/GreeterAspNet.csproj" />
     <Project Path="samples/GreeterClient/GreeterClient.asmproj" Type="13B669BE-BB05-4DDF-9536-439F39A36129" />
     <Project Path="samples/GreeterNet/GreeterNet.csproj" />
     <Project Path="samples/KvServer/KvServer.asmproj" Type="13B669BE-BB05-4DDF-9536-439F39A36129" />

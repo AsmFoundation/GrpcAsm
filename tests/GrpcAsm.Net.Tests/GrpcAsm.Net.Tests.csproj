@@ -4,6 +4,8 @@
     GrpcAsm.Net's tests (milestone C4): the .NET API over libgrpcasm.so, in both directions.
       GrpcAsmServer  .NET handlers (typed and raw) inline on the engine's workers, called by
                      grpc-dotnet (Grpc.Net.Client) in the same process
+      ServiceBinder  grpc-dotnet service classes on GrpcAsmServer, against the same classes on
+                     ASP.NET Core in the same process: the same answers and errors (ParityTests)
       GrpcAsmClient  the assembly client from .NET, against that server and against grpc-dotnet's
                      own server (Kestrel), plus a server that drops the connection
 
@@ -38,12 +40,16 @@
 
   <ItemGroup>
     <ProjectReference Include="../../src/GrpcAsm.Net/GrpcAsm.Net.csproj" />
+    <!-- The sample services (GreeterService, OrdersService) that ParityTests hosts on both servers. -->
+    <ProjectReference Include="../../samples/Greeter.Service/Greeter.Service.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <!-- The interop project's helloworld.proto, both sides generated here (its own namespace). -->
     <Protobuf Include="../Greeter.Interop/Protos/helloworld.proto" Link="Protos/helloworld.proto"
               GrpcServices="Both" />
+    <!-- test.Binder and test.Streaming: the binder's outcomes, hosted by both servers (ParityTests). -->
+    <Protobuf Include="Protos/binder.proto" GrpcServices="Both" />
   </ItemGroup>
 
 </Project>

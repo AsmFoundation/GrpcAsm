@@ -19,7 +19,9 @@
 #      skip), as KvAsm's suite requires of the same engine
 #   3. startup refusals: invalid GREETER_PORT / GREETER_WORKERS (exit 2, named
 #      in the log), a port another Greeter already serves (exit 1)
-# Env: GREETER_TEST_PORT (default 50251).
+# Env: GREETER_TEST_PORT (default 50251); GREETER_MODE, passed on to the server
+# (samples/GreeterNet): "service" changes one expectation, the malformed
+# request's status (see phase 1).
 # =============================================================================
 set -euo pipefail
 
@@ -103,7 +105,17 @@ A300=$(printf '%s' "$NAME300" | od -v -A n -t x1 | tr -d ' \n')
 call "SayHello, 300-byte name" /helloworld.Greeter/SayHello "\\x00\\x00\\x00\\x01\\x2f\\x0a\\xac\\x02$NAME300"
 expect "SayHello, 300-byte name" 200 0 "00000001350ab20248656c6c6f20$A300"
 call "SayHello, malformed" /helloworld.Greeter/SayHello '\x00\x00\x00\x00\x02\x0a\x09'
-expect "SayHello, malformed" 200 3 "" "malformed request message"
+# The Greeters written against GrpcAsm's own APIs (assembly, C, GreeterNet's
+# typed and raw modes) refuse a request they cannot parse INVALID_ARGUMENT.
+# GreeterNet's "service" mode is a grpc-dotnet class bound through
+# GrpcAsmServer.ServiceBinder, which answers as ASP.NET Core answers the same
+# bytes: UNKNOWN "Exception was thrown by handler." (measured against Kestrel:
+# tests/GrpcAsm.Net.Tests, ParityTests.A_malformed_request_is_refused_as_by_ASP_NET_Core).
+if [[ ${GREETER_MODE:-} == service ]]; then
+  expect "SayHello, malformed" 200 2 "" "Exception was thrown by handler."
+else
+  expect "SayHello, malformed" 200 3 "" "malformed request message"
+fi
 call "health, whole server" /grpc.health.v1.Health/Check '\x00\x00\x00\x00\x00'
 expect "health, whole server" 200 0 00000000020801
 call "health, helloworld.Greeter" /grpc.health.v1.Health/Check '\x00\x00\x00\x00\x14\x0a\x12helloworld.Greeter'

@@ -1,0 +1,42 @@
+// Test services for GrpcAsmServiceBinder (BinderService.cs): every way a grpc-dotnet unary
+// method can answer, hosted by both GrpcAsmServer (NetServer) and Kestrel (KestrelServer), so
+// ParityTests can check that a client sees the same thing from both.
+syntax = "proto3";
+
+option csharp_namespace = "GrpcAsm.Net.Tests.Protos";
+
+package test;
+
+// Unary methods, one per outcome.
+service Binder {
+  // Throws InvalidOperationException.
+  rpc Throw (Probe) returns (Probe);
+  // Throws RpcException(NOT_FOUND, "nope").
+  rpc RpcFail (Probe) returns (Probe);
+  // Returns Task.FromException(InvalidOperationException).
+  rpc FaultedTask (Probe) returns (Probe);
+  // Returns a completed Task whose result is null.
+  rpc NullReply (Probe) returns (Probe);
+  // Sets context.Status to PERMISSION_DENIED "set", then returns a reply.
+  rpc SetStatus (Probe) returns (Probe);
+  // An async method that completes without really awaiting: echoes the text.
+  rpc AsyncCompleted (Probe) returns (Probe);
+  // Really awaits (Task.Delay), then echoes the text.
+  rpc Pending (Probe) returns (Probe);
+  // Adds a response trailer "x-test: 1", then echoes the text.
+  rpc Trailers (Probe) returns (Probe);
+  // Calls WriteResponseHeadersAsync, then echoes the text.
+  rpc Headers (Probe) returns (Probe);
+  // Answers with what the context says: method|host|peer|deadline is max|headers count|cancellable.
+  rpc Context (Probe) returns (Probe);
+}
+
+// A streaming service: binding it on GrpcAsm must be refused before anything runs.
+service Streaming {
+  rpc Upload (stream Probe) returns (Probe);
+}
+
+// A text, in and out.
+message Probe {
+  string text = 1;
+}

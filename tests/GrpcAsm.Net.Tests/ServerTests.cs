@@ -35,15 +35,33 @@ public sealed class ServerTests(NetServer server)
             .ResponseAsync;
     }
 
-    /// <summary>The typed handler: parsed request, serialized reply.</summary>
+    /// <summary>The typed delegate handler (AddUnary&lt;,&gt;): parsed request, serialized reply.</summary>
     /// <returns>A task that completes when the test has run.</returns>
     [Fact]
     public async Task A_typed_handler_answers()
     {
         using GrpcChannel channel = Channel();
-        HelloReply reply = await new GreeterClient(channel).SayHelloAsync(
-            new HelloRequest { Name = "dotnet" }, cancellationToken: TestContext.Current.CancellationToken);
+        var method = new Method<HelloRequest, HelloReply>(MethodType.Unary, "test.Net", "TypedHello",
+            Marshallers.Create(r => r.ToByteArray(), HelloRequest.Parser.ParseFrom),
+            Marshallers.Create(r => r.ToByteArray(), HelloReply.Parser.ParseFrom));
+        HelloReply reply = await channel.CreateCallInvoker()
+            .AsyncUnaryCall(method, null, new CallOptions(cancellationToken: TestContext.Current.CancellationToken),
+                new HelloRequest { Name = "dotnet" }).ResponseAsync;
         Assert.Equal("Hello dotnet", reply.Message);
+    }
+
+    /// <summary>
+    /// helloworld.Greeter/SayHello is the sample's grpc-dotnet class, bound through the
+    /// ServiceBinder: the interop project's client (other C# namespace, same wire) gets its answer.
+    /// </summary>
+    /// <returns>A task that completes when the test has run.</returns>
+    [Fact]
+    public async Task A_bound_service_class_answers()
+    {
+        using GrpcChannel channel = Channel();
+        HelloReply reply = await new GreeterClient(channel).SayHelloAsync(
+            new HelloRequest { Name = "class" }, cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal("Hello class", reply.Message);
     }
 
     /// <summary>A raw handler, 1 MiB each way: the reply leaves through the engine's buffered path.</summary>
@@ -70,10 +88,13 @@ public sealed class ServerTests(NetServer server)
         Assert.Equal("nö, 100% ✓", e.Status.Detail);
     }
 
-    /// <summary>An exception from a handler: INTERNAL, grpc-dotnet's text, and the worker carries on.</summary>
+    /// <summary>
+    /// An exception from a delegate handler: UNKNOWN with grpc-dotnet's text, as from a bound
+    /// service class and from ASP.NET Core (ParityTests), and the worker carries on.
+    /// </summary>
     /// <returns>A task that completes when the test has run.</returns>
     [Fact]
-    public async Task A_throwing_handler_is_answered_internal()
+    public async Task A_throwing_handler_is_answered_unknown()
     {
         using GrpcChannel channel = Channel();
         var method = new Method<HelloRequest, HelloReply>(MethodType.Unary, "test.Net", "Throw",
@@ -82,7 +103,7 @@ public sealed class ServerTests(NetServer server)
         RpcException e = await Assert.ThrowsAsync<RpcException>(() => channel.CreateCallInvoker()
             .AsyncUnaryCall(method, null, new CallOptions(cancellationToken: TestContext.Current.CancellationToken),
                 new HelloRequest()).ResponseAsync);
-        Assert.Equal(StatusCode.Internal, e.StatusCode);
+        Assert.Equal(StatusCode.Unknown, e.StatusCode);
         Assert.Equal("Exception was thrown by handler.", e.Status.Detail);
         // The same worker still serves.
         HelloReply reply = await new GreeterClient(channel).SayHelloAsync(

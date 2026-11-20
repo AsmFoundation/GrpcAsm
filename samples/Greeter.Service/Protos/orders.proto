@@ -1,0 +1,61 @@
+// shop.Orders: a service whose request is a realistic record, about 1 KiB on the wire with the
+// benchmark's order (12 lines), instead of the Greeter's one short string. It is the second
+// workload of benchmarks/endtoend/2026-11-20-aspnet: there, parsing and building messages take
+// a real share of each call, and that work is the same on both servers (Google.Protobuf).
+syntax = "proto3";
+
+option csharp_namespace = "GrpcAsm.Samples";
+
+package shop;
+
+// Order intake.
+service Orders {
+  // Prices an order and answers with its receipt.
+  rpc Place (Order) returns (Receipt);
+}
+
+// An order as a storefront sends it.
+message Order {
+  string order_id = 1;
+  string customer_id = 2;
+  // ISO 4217 code, e.g. "EUR".
+  string currency = 3;
+  Address shipping = 4;
+  repeated Line lines = 5;
+  // A coupon code, or empty. "SAVE10" takes 10% off the subtotal.
+  string coupon = 6;
+  string note = 7;
+  int64 created_unix_ms = 8;
+}
+
+// A postal address.
+message Address {
+  string name = 1;
+  string street = 2;
+  string city = 3;
+  string region = 4;
+  string postal_code = 5;
+  // ISO 3166-1 alpha-2 code, e.g. "DE".
+  string country = 6;
+}
+
+// One line of an order.
+message Line {
+  string sku = 1;
+  string title = 2;
+  uint32 quantity = 3;
+  int64 unit_price_cents = 4;
+}
+
+// What the shop answers.
+message Receipt {
+  string order_id = 1;
+  int64 subtotal_cents = 2;
+  int64 discount_cents = 3;
+  int64 total_cents = 4;
+  // The sum of the lines' quantities.
+  uint32 items = 5;
+  string currency = 6;
+  // "ACCEPTED", always, for an order that passed the checks.
+  string status = 7;
+}

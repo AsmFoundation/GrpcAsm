@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <!--
+    GreeterAspNet: the rival. The C# services of samples/Greeter.Service (GreeterService,
+    OrdersService) on ASP.NET Core gRPC: Kestrel and grpc-dotnet, set up as `dotnet new grpc`
+    sets them up (CreateBuilder, AddGrpc, MapGrpcService, the template's logging levels), with
+    only the endpoint in code: h2c (HTTP/2 without TLS) on GREETER_PORT, which is what gRPC
+    clients and h2load speak to GreeterNet too.
+
+    benchmarks/endtoend/2026-11-20-aspnet runs it against samples/GreeterNet (the same classes on
+    GrpcAsm's assembly engine); tests/GrpcAsm.Net.Tests checks that both servers answer the same
+    calls the same way.
+
+    GREETER_PORT (1..65535, default 50051). Stops on SIGTERM or SIGINT (ASP.NET Core's own
+    handling) with exit code 0.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- As GreeterNet: no ICU, so a self-contained publish runs in the benchmark's image, which
+         has none. Nothing on a gRPC call's path is culture-specific. -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- grpc-dotnet's server; the version as in tests/Directory.Packages.props. -->
+    <PackageReference Include="Grpc.AspNetCore" Version="2.85.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The C# services and their messages, shared with GreeterNet. -->
+    <ProjectReference Include="../Greeter.Service/Greeter.Service.csproj" />
+  </ItemGroup>
+</Project>

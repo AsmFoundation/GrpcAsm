@@ -61,7 +61,7 @@ public sealed class ClientTests(NetServer server)
         Assert.Equal("nö, 100% ✓", e.Status.Detail);
         e = await Assert.ThrowsAsync<RpcException>(() =>
             client.CallAsync(client.Method("/test.Net/Throw"), new HelloRequest(), HelloReply.Parser));
-        Assert.Equal(StatusCode.Internal, e.StatusCode);
+        Assert.Equal(StatusCode.Unknown, e.StatusCode);
         e = await Assert.ThrowsAsync<RpcException>(() => client.CallAsync(client.Method("/no.Such/Method"), []));
         Assert.Equal(StatusCode.Unimplemented, e.StatusCode);
     }

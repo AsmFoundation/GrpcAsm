@@ -166,7 +166,8 @@ public readonly unsafe ref struct GrpcAsmCall
 /// <remarks>
 /// <para>
 /// Lifecycle: create, register methods (<see cref="AddUnary(string, RawUnaryHandler)"/>,
-/// <see cref="AddUnary{TRequest, TResponse}(string, Func{TRequest, TResponse})"/>),
+/// <see cref="AddUnary{TRequest, TResponse}(string, Func{TRequest, TResponse})"/>, or a whole
+/// grpc-dotnet service class through <see cref="ServiceBinder"/>),
 /// <see cref="Start"/>, then <see cref="Stop"/> (or <see cref="Dispose"/>). The engine also
 /// answers, without any handler: the gRPC health service (SERVING for every service that has a
 /// method), UNIMPLEMENTED, the HTTP-level refusals and RESOURCE_EXHAUSTED above
@@ -178,9 +179,9 @@ public readonly unsafe ref struct GrpcAsmCall
 /// no queue, no thread switch, no allocation by this class. The C ABI requires the answer
 /// before the handler returns, so a handler cannot hand its call to another thread (running
 /// handlers on the thread pool would need an asynchronous answer in the C ABI first). An
-/// exception thrown by a handler is answered: an <see cref="RpcException"/> with its status and
-/// detail, anything else INTERNAL "Exception was thrown by handler." (grpc-dotnet's text). The
-/// worker carries on.
+/// exception thrown by a handler is answered as grpc-dotnet's server answers it: an
+/// <see cref="RpcException"/> with its status and detail, anything else UNKNOWN "Exception was
+/// thrown by handler." (tests/GrpcAsm.Net.Tests compares with ASP.NET Core). The worker carries on.
 /// </para>
 /// <para>
 /// Footgun: one started server per process (the engine binds its hooks at link time);
@@ -197,6 +198,29 @@ public sealed unsafe class GrpcAsmServer : IDisposable
 
     /// <summary>True between a successful <see cref="Start"/> and <see cref="Stop"/>.</summary>
     private bool _started;
+
+    /// <summary>The binder of <see cref="ServiceBinder"/>, created on first use.</summary>
+    private GrpcAsmServiceBinder? _binder;
+
+    /// <summary>
+    /// Hosts grpc-dotnet service classes: pass it to the <c>BindService</c> method Grpc.Tools
+    /// generates, before <see cref="Start"/>, and every unary method of the service is registered.
+    /// <code>Greeter.BindService(server.ServiceBinder, new GreeterService());</code>
+    /// </summary>
+    /// <remarks>
+    /// The same class ASP.NET Core hosts with <c>MapGrpcService&lt;T&gt;()</c>, with the limits
+    /// listed on <see cref="GrpcAsmServiceBinder"/>: unary methods only, a handler's
+    /// <see cref="Task"/> complete when it returns, a partial <see cref="ServerCallContext"/>.
+    /// </remarks>
+    /// <exception cref="ObjectDisposedException">The server is disposed.</exception>
+    public GrpcAsmServiceBinder ServiceBinder
+    {
+        get
+        {
+            ThrowIfUnusable();
+            return _binder ??= new GrpcAsmServiceBinder(this);
+        }
+    }
 
     /// <summary>Creates a server (not started).</summary>
     /// <param name="options">Options, or null for every default.</param>
@@ -427,8 +451,10 @@ public sealed unsafe class GrpcAsmServer : IDisposable
     /// <remarks>
     /// Nothing may escape into the engine: an exception unwinding through assembly frames would
     /// corrupt the worker. So every exception is answered here — an <see cref="RpcException"/>
-    /// with its status, anything else INTERNAL — and only an out-of-memory answer (the engine's
-    /// own failure) ends the connection, as the C ABI's contract says.
+    /// with its status, anything else UNKNOWN, as grpc-dotnet's server answers them (measured
+    /// against Kestrel by ParityTests; this said INTERNAL until 2026-11-20) — and only an
+    /// out-of-memory answer (the engine's own failure) ends the connection, as the C ABI's
+    /// contract says.
     /// </remarks>
     [UnmanagedCallersOnly]
     private static int Dispatch(nint context, nint call, byte* request, nuint length)
@@ -450,7 +476,7 @@ public sealed unsafe class GrpcAsmServer : IDisposable
         }
         catch (Exception)
         {
-            return TryFail(answer, StatusCode.Internal, "Exception was thrown by handler.");
+            return TryFail(answer, StatusCode.Unknown, "Exception was thrown by handler.");
         }
     }
 

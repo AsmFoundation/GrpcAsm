@@ -16,10 +16,14 @@ namespace GrpcAsm.Net.Tests;
 /// <remarks>
 /// <para>Methods (handlers run inline on the engine's two workers):</para>
 /// <list type="bullet">
-/// <item><c>/helloworld.Greeter/SayHello</c> (typed): "Hello " + name.</item>
+/// <item><c>/helloworld.Greeter/SayHello</c>, <c>/shop.Orders/Place</c> and every <c>/test.Binder/*</c>:
+/// grpc-dotnet service classes (samples/Greeter.Service's GreeterService and OrdersService, the
+/// test's <see cref="BinderService"/>) bound through <see cref="GrpcAsmServer.ServiceBinder"/>, as
+/// <see cref="KestrelServer"/> maps them on ASP.NET Core.</item>
+/// <item><c>/test.Net/TypedHello</c> (typed delegate): "Hello " + name.</item>
 /// <item><c>/test.Net/Echo</c> (raw): the request's bytes back.</item>
 /// <item><c>/test.Net/Fail</c> (raw): request [status][UTF-8 message] answered with that status.</item>
-/// <item><c>/test.Net/Throw</c> (typed): throws InvalidOperationException (INTERNAL).</item>
+/// <item><c>/test.Net/Throw</c> (typed): throws InvalidOperationException (UNKNOWN, as grpc-dotnet answers it).</item>
 /// <item><c>/test.Net/RpcFail</c> (typed): throws RpcException(NOT_FOUND, "nope").</item>
 /// <item><c>/test.Net/AnswerThenThrow</c> (raw): replies, then throws (the reply stands).</item>
 /// </list>
@@ -34,6 +38,9 @@ public sealed class NetServer : IAsyncLifetime
 
     /// <summary>The port the server listens on (127.0.0.1).</summary>
     public int Port { get; private set; }
+
+    /// <summary>The started server, for tests of what a running server refuses; null when it does not run.</summary>
+    public GrpcAsmServer? Server => _server;
 
     /// <summary>Why the server could not run, or null.</summary>
     public string? UnavailableReason { get; private set; }
@@ -55,7 +62,12 @@ public sealed class NetServer : IAsyncLifetime
 
             Port = FreePort();
             _server = new GrpcAsmServer(new GrpcAsmServerOptions { Port = Port, Workers = 2 });
-            _server.AddUnary<HelloRequest, HelloReply>("/helloworld.Greeter/SayHello",
+            // The grpc-dotnet classes, as ASP.NET Core would host them (KestrelServer does).
+            // Fully qualified: the sample's helloworld types live beside the interop project's.
+            GrpcAsm.Samples.Greeter.BindService(_server.ServiceBinder, new GrpcAsm.Samples.GreeterService());
+            GrpcAsm.Samples.Orders.BindService(_server.ServiceBinder, new GrpcAsm.Samples.OrdersService());
+            Protos.Binder.BindService(_server.ServiceBinder, new BinderService());
+            _server.AddUnary<HelloRequest, HelloReply>("/test.Net/TypedHello",
                 request => new HelloReply { Message = "Hello " + request.Name });
             _server.AddUnary("/test.Net/Echo", (request, call) => call.Reply(request));
             _server.AddUnary("/test.Net/Fail", (request, call) =>
