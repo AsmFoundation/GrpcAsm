@@ -8,11 +8,12 @@
       GrpcAsmClient  the assembly client in its bytes-in, bytes-out mode, driven by a .NET
                      Socket: thread-safe CallAsync returning Tasks
 
-    The ProjectReference to GrpcAsm.Native builds libgrpcasm.so and copies it next to this
-    assembly and, transitively, next to every program that references it (AsmFoundation.Sdk's
-    csproj -> asmproj rule), where [LibraryImport("grpcasm")] finds it. Linux x64 only: the
-    library is an ELF file. Packaging (a NuGet package with runtimes/linux-x64/native) is
-    milestone E.
+    The ProjectReference to GrpcAsm.Native builds libgrpcasm.so and delivers it with this
+    assembly and, transitively, with every program that references it (AsmFoundation.Sdk's
+    csproj -> asmproj rule): in a portable build under runtimes/linux-x64/native/ and in the
+    program's deps.json, in a build for linux-x64 next to the program. [LibraryImport("grpcasm")]
+    finds it either way, through the .NET host. Linux x64 only: the library is an ELF file.
+    Packaging (a NuGet package with runtimes/linux-x64/native) is milestone E.
   -->
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>

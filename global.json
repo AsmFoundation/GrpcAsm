@@ -1,6 +1,6 @@
 {
   "msbuild-sdks": {
-    "AsmFoundation.Sdk": "0.2.0"
+    "AsmFoundation.Sdk": "0.3.0"
   },
   "test": {
     "runner": "Microsoft.Testing.Platform"

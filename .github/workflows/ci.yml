@@ -121,9 +121,10 @@ jobs:
       - name: The NASM API's generated code — jump table, compare chain, aliases
         run: bash tests/nasmapi.sh
 
-      # libgrpcasm.so is next to the test assembly (GrpcAsm.Net's reference to
-      # GrpcAsm.Native copies it); GRPCASM_REQUIRE_LINUX turns a library that
-      # cannot load into a failure instead of skipped tests.
+      # libgrpcasm.so reaches the test assembly through GrpcAsm.Net's reference
+      # to GrpcAsm.Native (runtimes/linux-x64/native/, listed in its deps.json);
+      # GRPCASM_REQUIRE_LINUX turns a library that cannot load into a failure
+      # instead of skipped tests.
       # It also hosts the same service classes on Kestrel in the test process
       # and compares their answers and errors with GrpcAsm's (ParityTests).
       - name: GrpcAsm.Net — the .NET API over libgrpcasm.so, and parity with ASP.NET Core

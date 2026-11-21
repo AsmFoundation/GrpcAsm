@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # greeter.sh — the Greeter's end-to-end checks (tests/greeter/run.sh) against
-# samples/Greeter/bin/Release/libc/greeter: exact answers through nghttp, h2spec
+# samples/Greeter/bin/Release/libc/linux-x64/greeter: exact answers through nghttp, h2spec
 # (all 146 cases), startup refusals and a clean SIGTERM.
 #
 # Usage: tests/greeter.sh
@@ -19,7 +19,7 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-binary_dir="$here/samples/Greeter/bin/Release/libc"
+binary_dir="$here/samples/Greeter/bin/Release/libc/linux-x64"
 
 if [ ! -f "$binary_dir/greeter" ]; then
   echo "build first: dotnet build GrpcAsm.slnx -c Release" >&2

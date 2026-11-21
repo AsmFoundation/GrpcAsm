@@ -103,7 +103,7 @@ public sealed class GreeterServer : IAsyncLifetime
 
     /// <summary>
     /// Finds the Greeter executable: <c>GREETER_BINARY</c> when set, else
-    /// <c>samples/Greeter/bin/Release/libc/greeter</c> under the first ancestor of the test assembly
+    /// <c>samples/Greeter/bin/Release/libc/linux-x64/greeter</c> under the first ancestor of the test assembly
     /// that holds <c>GrpcAsm.slnx</c>.
     /// </summary>
     /// <returns>The executable's full path.</returns>
@@ -121,7 +121,7 @@ public sealed class GreeterServer : IAsyncLifetime
         {
             if (File.Exists(Path.Combine(dir.FullName, "GrpcAsm.slnx")))
             {
-                string candidate = Path.Combine(dir.FullName, "samples", "Greeter", "bin", "Release", "libc", "greeter");
+                string candidate = Path.Combine(dir.FullName, "samples", "Greeter", "bin", "Release", "libc", "linux-x64", "greeter");
                 return File.Exists(candidate)
                     ? candidate
                     : throw new FileNotFoundException("build first: dotnet build GrpcAsm.slnx -c Release", candidate);

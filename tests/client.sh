@@ -18,9 +18,9 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-library_dir="$here/src/GrpcAsm.Native/bin/Release/libc"
-greeter="$here/samples/Greeter/bin/Release/libc/greeter"
-greeter_client="$here/samples/GreeterClient/bin/Release/libc/greeter_client"
+library_dir="$here/src/GrpcAsm.Native/bin/Release/libc/linux-x64"
+greeter="$here/samples/Greeter/bin/Release/libc/linux-x64/greeter"
+greeter_client="$here/samples/GreeterClient/bin/Release/libc/linux-x64/greeter_client"
 
 if [ ! -f "$library_dir/libgrpcasm.so" ] || [ ! -f "$greeter" ] || [ ! -f "$greeter_client" ]; then
   echo "build first: dotnet build GrpcAsm.slnx -c Release" >&2
@@ -32,8 +32,8 @@ fi
 MSYS_NO_PATHCONV=1 docker run --rm \
   -v "$library_dir:/lib-under-test:ro" \
   -v "$here/src/GrpcAsm.Native/include:/inc:ro" \
-  -v "$here/samples/Greeter/bin/Release/libc:/greeter:ro" \
-  -v "$here/samples/GreeterClient/bin/Release/libc:/gclient:ro" \
+  -v "$here/samples/Greeter/bin/Release/libc/linux-x64:/greeter:ro" \
+  -v "$here/samples/GreeterClient/bin/Release/libc/linux-x64:/gclient:ro" \
   -v "$here/tests/capi:/capi:ro" \
   -v "$here/tests/client:/t:ro" \
   kvasm-toolchain:latest bash /t/run.sh /lib-under-test /inc /greeter/greeter /capi /t \

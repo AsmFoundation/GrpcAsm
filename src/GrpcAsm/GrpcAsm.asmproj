@@ -20,6 +20,9 @@
          libc program can link it, and NuGet refuses it to a freestanding project (NU1201)
          instead of a link failing later. -->
     <TargetFramework>libc</TargetFramework>
+    <!-- Linux x86-64 code (Linux system calls, epoll, the System V ABI). AsmSdk 0.3.0 builds the
+         RIDs a project lists, and stops with ASM0010 when it names none. -->
+    <RuntimeIdentifiers>linux-x64</RuntimeIdentifiers>
     <AssemblyName>grpcasm</AssemblyName>
     <!-- PackageId defaults to AssemblyName, as in .NET, and GrpcAsm.Native's is grpcasm too
          (libgrpcasm.so): two projects of one restore graph with the same name are

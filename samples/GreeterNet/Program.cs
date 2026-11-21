@@ -66,7 +66,7 @@ try
 }
 catch (Exception e) when (e is DllNotFoundException or BadImageFormatException or OutOfMemoryException)
 {
-    // DllNotFound: not Linux x64, or libgrpcasm.so is not next to the program;
+    // DllNotFound: not Linux x64, or libgrpcasm.so was not deployed with the program;
     // BadImageFormat: a libgrpcasm.so of another ABI version.
     Log.Line("ERROR", $"msg=\"cannot create the server\" error=\"{e.Message}\"");
     return 1;

@@ -20,7 +20,11 @@ namespace GrpcAsm.Net;
 /// </remarks>
 internal static unsafe partial class Native
 {
-    /// <summary>The library's name: <c>libgrpcasm.so</c>, found next to the application.</summary>
+    /// <summary>
+    /// The library's name: <c>libgrpcasm.so</c>, which the .NET host finds through the
+    /// application's deps.json (runtimes/linux-x64/native/ in a portable build) or next to the
+    /// application (a build for linux-x64).
+    /// </summary>
     private const string Library = "grpcasm";
 
     /// <summary>EINVAL: an argument is out of range.</summary>
@@ -54,7 +58,7 @@ internal static unsafe partial class Native
     /// Throws unless the loaded <c>libgrpcasm.so</c> has the major and minor version this
     /// assembly is written against. Called before the first server or client is created.
     /// </summary>
-    /// <exception cref="DllNotFoundException">No libgrpcasm.so could be loaded (not Linux x64, or not deployed next to the application).</exception>
+    /// <exception cref="DllNotFoundException">No libgrpcasm.so could be loaded (not Linux x64, or not deployed with the application).</exception>
     /// <exception cref="BadImageFormatException">The loaded library is another version of the ABI.</exception>
     /// <remarks>
     /// Why: P/Invoke looks symbols up by name, without the ELF version (GRPCASM_0.1) that the C

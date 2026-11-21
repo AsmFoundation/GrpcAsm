@@ -232,7 +232,7 @@ public sealed class KestrelGreeter : IAsyncLifetime
 
     /// <summary>
     /// Finds the NASM client: <c>GREETER_CLIENT_BINARY</c> when set, else
-    /// <c>samples/GreeterClient/bin/Release/libc/greeter_client</c> under the first ancestor of the
+    /// <c>samples/GreeterClient/bin/Release/libc/linux-x64/greeter_client</c> under the first ancestor of the
     /// test assembly that holds <c>GrpcAsm.slnx</c>.
     /// </summary>
     /// <returns>The executable's full path.</returns>
@@ -250,7 +250,7 @@ public sealed class KestrelGreeter : IAsyncLifetime
         {
             if (File.Exists(Path.Combine(dir.FullName, "GrpcAsm.slnx")))
             {
-                string candidate = Path.Combine(dir.FullName, "samples", "GreeterClient", "bin", "Release", "libc",
+                string candidate = Path.Combine(dir.FullName, "samples", "GreeterClient", "bin", "Release", "libc", "linux-x64",
                     "greeter_client");
                 return File.Exists(candidate)
                     ? candidate

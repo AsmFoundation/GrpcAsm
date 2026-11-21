@@ -18,7 +18,7 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-library_dir="$here/src/GrpcAsm.Native/bin/Release/libc"
+library_dir="$here/src/GrpcAsm.Native/bin/Release/libc/linux-x64"
 
 if [ ! -f "$library_dir/libgrpcasm.so" ]; then
   echo "build first: dotnet build GrpcAsm.slnx -c Release" >&2

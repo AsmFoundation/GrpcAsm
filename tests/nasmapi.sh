@@ -20,14 +20,14 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-archive="$here/src/GrpcAsm/bin/Release/libc/libgrpcasm.a"
+archive="$here/src/GrpcAsm/bin/Release/libc/linux-x64/libgrpcasm.a"
 [ -f "$archive" ] || { echo "build first: dotnet build GrpcAsm.slnx -c Release" >&2; exit 2; }
 
 # MSYS_NO_PATHCONV keeps Git Bash on Windows from rewriting the container
 # paths into Windows paths.
 MSYS_NO_PATHCONV=1 docker run --rm \
   -v "$here/src/GrpcAsm/include:/inc:ro" \
-  -v "$here/src/GrpcAsm/bin/Release/libc:/lib-under-test:ro" \
+  -v "$here/src/GrpcAsm/bin/Release/libc/linux-x64:/lib-under-test:ro" \
   -v "$here/tests/nasmapi:/t:ro" \
   kvasm-toolchain:latest bash -c '
     set -e

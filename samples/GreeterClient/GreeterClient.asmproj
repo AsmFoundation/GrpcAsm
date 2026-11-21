@@ -15,6 +15,9 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>libc</TargetFramework>
+    <!-- Linux x86-64 code (Linux system calls, epoll, the System V ABI). AsmSdk 0.3.0 builds the
+         RIDs a project lists, and stops with ASM0010 when it names none. -->
+    <RuntimeIdentifiers>linux-x64</RuntimeIdentifiers>
     <AssemblyName>greeter_client</AssemblyName>
   </PropertyGroup>
   <ItemGroup>

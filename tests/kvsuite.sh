@@ -9,7 +9,7 @@
 # cancellation, concurrency, streaming, graceful shutdown, idle timeouts,
 # snapshots, startup refusals, h2spec (146 cases), the fuzzer's request matrix
 # and 3,000 fuzzed connections, streaming limits and fairness - with the
-# server binary under test being samples/KvServer/bin/Release/libc/kvserver.
+# server binary under test being samples/KvServer/bin/Release/libc/linux-x64/kvserver.
 #
 # Why KvAsm's suite: every extraction step must leave the engine's behavior
 # exactly as KvAsm's (h2spec, fuzzing and the exact-answer matrix catch protocol
@@ -28,7 +28,7 @@ set -euo pipefail
 kvasm="${1:?usage: tests/kvsuite.sh <path to a KvAsm checkout> [fuzz iterations]}"
 iterations="${2:-3000}"
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-binary_dir="$here/samples/KvServer/bin/Release/libc"
+binary_dir="$here/samples/KvServer/bin/Release/libc/linux-x64"
 
 if [ ! -f "$binary_dir/kvserver" ]; then
   echo "build first: dotnet build GrpcAsm.slnx -c Release" >&2

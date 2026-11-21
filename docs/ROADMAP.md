@@ -63,18 +63,27 @@ GrpcAsm relies on AsmSdk only as any consumer does. All of the following is
 documented AsmSdk behavior (AsmSdk's `docs/asmproj.md`), and none of it was
 built for GrpcAsm:
 
-- **The pin:** `global.json` pins `AsmFoundation.Sdk` 0.2.0 (`msbuild-sdks`; 0.1.0 until
-  2026-11-18).
+- **The pin:** `global.json` pins `AsmFoundation.Sdk` 0.3.0 (`msbuild-sdks`; 0.1.0 until
+  2026-11-18, 0.2.0 until 2026-11-21).
   Restore takes it from nuget.org, together with the toolchain package for the
   build machine. Nothing else is installed, and Windows, Linux and macOS all
   build the same Linux x86-64 ELF.
+- **One RID:** AsmSdk 0.3.0 builds the runtime identifiers a project lists, and stops
+  with ASM0010 when it lists none. Every `.asmproj` lists `linux-x64`: the engine is
+  Linux x86-64 code (Linux system calls, epoll, the System V ABI). The 0.3.0 build is
+  byte-identical to the 0.2.0 one in `.text` for all four outputs (`libgrpcasm.so`,
+  `greeter`, `greeter_client`, `kvserver`, built from one commit with each SDK), with
+  the same 22 exports in `libgrpcasm.so` and none in the programs.
 - **Project types,** with .NET's own property names since AsmSdk 0.2.0:
   - `OutputType` `StaticLibrary` for the engine (`libgrpcasm.a`);
   - `Exe` for KvServer, the Greeter and the client sample;
   - `Library` for `libgrpcasm.so`;
   - `TargetFramework` `libc` for every project, the engine included: it calls glibc
     (`pthread_create`, the allocator), so NuGet refuses it to a freestanding project
-    instead of a link failing later. Outputs go to `bin/<Configuration>/libc/`.
+    instead of a link failing later. Outputs go to `bin/<Configuration>/libc/linux-x64/`
+    (the RID folder since 0.3.0). A .NET project that references `GrpcAsm.Native` gets
+    `libgrpcasm.so` under `runtimes/linux-x64/native/` and in its `deps.json` in a
+    portable build, next to the program for `-r linux-x64`.
   - `AssemblyName` `grpcasm` names both libraries, so each project sets its own
     `PackageId` (`GrpcAsm`, `GrpcAsm.Native`): NuGet needs distinct project names in one
     restore graph.
@@ -113,7 +122,7 @@ matrix, CI, and the engine's own configuration struct (below).
   table, snapshot, `grpc.asm`, configuration, `main`). It links the engine
   through a ProjectReference.
 - Both build from the published AsmFoundation.Sdk 0.1.0 (0.2.0 since
-  2026-11-18: see "Building GrpcAsm with AsmSdk").
+  2026-11-18, 0.3.0 since 2026-11-21: see "Building GrpcAsm with AsmSdk").
 - **Verified:** `tests/kvsuite.sh` runs KvAsm's whole end-to-end suite
   against the split binary and every phase passes (h2spec 146/146, the
   500-conversation matrix exact, 3,000 fuzzed connections). That is the gate
